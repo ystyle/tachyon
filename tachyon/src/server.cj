@@ -247,12 +247,23 @@ public class Server {
             return false
         }
         if (cl == -1) {
-            // chunked：先不支持，按 400 处理（P3 再实现）
-            let err = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-            try {
-                conn.write(err.toArray())
-            } catch (e: Exception) {}
-            return false
+            // chunked transfer-encoding（RFC 9112 §7.1）
+            let out = Array<Byte>(maxRequestBodySize, repeat: 0)
+            let cr = ChunkedReader()
+            let n = try {
+                cr.readBody(conn, reader, out, maxRequestBodySize)
+            } catch (e: Exception) {
+                -1
+            }
+            if (n < 0) {
+                let err = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                try {
+                    conn.write(err.toArray())
+                } catch (e: Exception) {}
+                return false
+            }
+            ctx.req.body = Bytes(out, 0, n)
+            return true
         }
 
         // 定长：先把缓冲里已有的拷出来，再继续读

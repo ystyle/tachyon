@@ -51,6 +51,18 @@ public class RequestCtx {
         return req.headerGetStr(name)
     }
 
+    /** 请求 Cookie（惰性解析 "Cookie: a=1; b=2"） */
+    public func cookie(name: String): Bytes {
+        let c = CookieView()
+        c.reset(req.header.cookie)
+        return c.get(name)
+    }
+
+    /** 追加一条 Set-Cookie */
+    public func setCookie(b: SetCookieBuilder): Unit {
+        addHeader("Set-Cookie", b.toString())
+    }
+
     public func isGet(): Bool { return req.isGet }
     public func isHead(): Bool { return req.isHead }
     public func isPost(): Bool { return req.method.equals(Bytes("POST".toArray())) }
