@@ -2,7 +2,7 @@ package ystyle::tachyon
 
 import std.net.{TcpServerSocket, TcpSocket}
 import std.sync.{SyncCounter, AtomicBool, AtomicInt64, Mutex, Semaphore}
-import std.collection.HashMap
+import std.collection.{HashMap, ArrayList}
 import std.time.MonoTime
 
 /**
@@ -15,7 +15,9 @@ import std.time.MonoTime
  * 与 fasthttp 的差异：没有 workerPool，并发上限用 Semaphore 语义（拿不到就 503）。
  */
 public class Server {
-    let handler: RequestHandler
+    // handler 可被中间件包裹（Use 在 listenAndServe 前调用）
+    var handler: RequestHandler
+    let middlewares: ArrayList<Middleware> = ArrayList<Middleware>()
     let dateCache: DateCache = DateCache()
 
     // ---- 配置 ----
@@ -54,6 +56,12 @@ public class Server {
     var writerPool: ?ObjectPool<BufferedWriter> = None
     var ctxPool: ?ObjectPool<RequestCtx> = None
 
+    /** 注册中间件。必须在 listenAndServe / serve 之前调用。 */
+    public func use(mw: Middleware): Server {
+        middlewares.add(mw)
+        return this
+    }
+
     public init(handler: RequestHandler) {
         this.handler = handler
         this.dateCache.start()
@@ -76,6 +84,9 @@ public class Server {
     }
 
     func initLimiter(): Unit {
+        if (middlewares.size > 0) {
+            handler = compose(handler, middlewares)
+        }
         if (concurrency > 0) {
             connSem = Some(Semaphore(concurrency))
         }

@@ -19,7 +19,7 @@ public class RequestCtx {
     var writeDeadline: ?Duration = None
     var userValues: ?HashMap<String, Object> = None
 
-    init(headerCap: Int64) {
+    public init(headerCap: Int64) {
         req = Request(headerCap)
         resp = Response(headerCap)
     }
@@ -34,6 +34,26 @@ public class RequestCtx {
             case Some(m) => m.clear()
             case None => ()
         }
+    }
+
+    /** 仅供测试/中间件构造请求头（生产代码不应调用） */
+    public func setRequestHeaderInternal(name: String, value: String): Unit {
+        req.header.add(
+            req.header.copyIn(name.toArray(), 0, name.toArray().size),
+            req.header.copyIn(value.toArray(), 0, value.toArray().size)
+        )
+    }
+
+    /** 仅供测试：设置 content-length */
+    public func setContentLengthInternal(n: Int64): Unit {
+        req.contentLength = n
+    }
+
+    /** 仅供测试：设置方法 */
+    public func setMethodInternal(m: String): Unit {
+        req.method = Bytes(m.toArray())
+        req.isGet = req.method.equals(Bytes("GET".toArray()))
+        req.isHead = req.method.equals(Bytes("HEAD".toArray()))
     }
 
     // ---- 请求侧（只读视图）----
@@ -77,6 +97,16 @@ public class RequestCtx {
 
     public func statusCode(): UInt16 {
         return resp.statusCode
+    }
+
+    /** 读取响应头（中间件/测试用） */
+    public func responseHeaderGet(name: String): Bytes {
+        return resp.header.getIgnoreCase(Bytes(name.toArray()))
+    }
+
+    /** 响应 body 的字节数（access log 等中间件用） */
+    public func responseBodyLen(): Int64 {
+        return resp.bodyLength()
     }
 
     public func setContentType(ct: String): Unit {

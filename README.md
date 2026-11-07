@@ -105,7 +105,8 @@ cjpm **默认不开 `-O2`** —— 不写这条，性能设计全部作废。
 - [x] 静态文件（P5）：目录索引 / Range / If-Modified-Since / 路径穿越防护
 - [x] 并发上限（Semaphore + 503）
 - [x] 全部 Server 配置项生效（getOnly / maxConnsPerIP / readBufferSize / writeTimeout / ...）
-- [ ] 中间件（access log / 可选 recovery）
+- [x] 中间件：access log / recovery / requestID / CORS / bodyLimit（Server.use）
+- [x] 44 个单元测试
 
 ## License
 
