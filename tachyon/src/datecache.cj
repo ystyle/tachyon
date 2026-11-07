@@ -116,3 +116,113 @@ func buildDateLine(): Array<Byte> {
             pad2(now.hour) + ":" + pad2(now.minute) + ":" + pad2(now.second) + " GMT\r\n"
     return s.toArray()
 }
+
+/** 秒级 unix 时间戳 -> "Sat, 07 Nov 2026 20:56:38 GMT"（不含 "Date: " 前缀） */
+public func formatHTTPDate(unixSec: Int64): String {
+    // 直接按 unix 秒手工算年月日时（civil_from_days 算法，纯整数、无分配）。
+    // 不用 DateTime：它的构造需要 TimeZone，而 UTC 常量在 std.time 里不可直接引用。
+    var days = unixSec / 86400
+    var secsOfDay = unixSec % 86400
+    if (secsOfDay < 0) {
+        secsOfDay += 86400
+        days -= 1
+    }
+    let (y, m, d) = civilFromDays(days)
+    let hh = secsOfDay / 3600
+    let mm = (secsOfDay % 3600) / 60
+    let ss = secsOfDay % 60
+    // 1970-01-01 是周四（weekday 4）
+    var wd = ((days % 7) + 7) % 7
+    wd = (wd + 4) % 7
+    return weekDayNames[wd] + ", " + pad2(d) + " " + monthNames[m - 1] + " " + y.toString() + " " +
+        pad2(hh) + ":" + pad2(mm) + ":" + pad2(ss) + " GMT"
+}
+
+/** Howard Hinnant 的 civil_from_days（days since 1970-01-01 -> (y, m, d)） */
+func civilFromDays(days0: Int64): (Int64, Int64, Int64) {
+    var z = days0 + 719468
+    let era = (if (z >= 0) { z } else { z - 146096 }) / 146097
+    let doe = z - era * 146097
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+    let y = yoe + era * 400
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
+    let mp = (5 * doy + 2) / 153
+    let d = doy - (153 * mp + 2) / 5 + 1
+    let m = if (mp < 10) { mp + 3 } else { mp - 9 }
+    let yy = if (m <= 2) { y + 1 } else { y }
+    return (yy, m, d)
+}
+
+/** 解析 IMF-fixdate："Sat, 07 Nov 2026 20:56:38 GMT"。失败返回 -1 */
+public func parseHTTPDate(v: Bytes): Int64 {
+    let s = v.toStr().trimAscii()
+    // 最短满足 "Sat, 07 Nov 2026 20:56:38 GMT" = 29
+    if (s.size < 29) {
+        return -1
+    }
+    let comma = match (s.indexOf(",")) { case Some(i) => i; case None => return -1 }
+    if (comma != 3) {
+        return -1
+    }
+    // "Sat, 07 Nov 2026 20:56:38 GMT"
+    let rest = s[5..]
+    let p = rest.split(" ")
+    if (p.size < 4) {
+        return -1
+    }
+    let day = parseIntOr(p[0], -1)
+    let month = monthIdx(p[1])
+    let year = parseIntOr(p[2], -1)
+    let t = splitTime(p[3])
+    if (day < 0 || month <= 0 || year < 0) {
+        return -1
+    }
+    return daysFromCivil(year, month, day) * 86400 + t[0] * 3600 + t[1] * 60 + t[2]
+}
+
+/** (y, m, d) -> days since 1970-01-01 */
+func daysFromCivil(y0: Int64, m: Int64, d: Int64): Int64 {
+    let y = if (m <= 2) { y0 - 1 } else { y0 }
+    let era = (if (y >= 0) { y } else { y - 399 }) / 400
+    let yoe = y - era * 400
+    let mp = if (m > 2) { m - 3 } else { m + 9 }
+    let doy = (153 * mp + 2) / 5 + d - 1
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
+    return era * 146097 + doe - 719468
+}
+
+func parseIntOr(s: String, dflt: Int64): Int64 {
+    var v: Int64 = 0
+    if (s.size == 0) {
+        return dflt
+    }
+    for (c in s.toArray()) {
+        if (c < 48 || c > 57) {
+            return dflt
+        }
+        v = v * 10 + (Int64(c) - 48)
+    }
+    return v
+}
+
+func monthIdx(name: String): Int64 {
+    var i: Int64 = 0
+    while (i < 12) {
+        if (monthNames[i] == name) {
+            return i + 1
+        }
+        i += 1
+    }
+    return -1
+}
+
+func splitTime(s: String): Array<Int64> {
+    let parts = s.split(":")
+    var r: Array<Int64> = [0, 0, 0]
+    if (parts.size >= 3) {
+        r[0] = parseIntOr(parts[0], 0)
+        r[1] = parseIntOr(parts[1], 0)
+        r[2] = parseIntOr(parts[2], 0)
+    }
+    return r
+}

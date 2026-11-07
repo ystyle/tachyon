@@ -1,7 +1,8 @@
 package ystyle::tachyon
 
 import std.net.{TcpServerSocket, TcpSocket}
-import std.sync.{SyncCounter, AtomicBool, AtomicInt64, Mutex}
+import std.sync.{SyncCounter, AtomicBool, AtomicInt64, Mutex, Semaphore}
+import std.collection.HashMap
 import std.time.MonoTime
 
 /**
@@ -39,6 +40,10 @@ public class Server {
     var connIdSeq: AtomicInt64 = AtomicInt64(0)
     let connLock: Mutex = Mutex()
 
+    // 并发连接上限：拿不到名额回 503 并关连接（照搬 fasthttp server.go:2152-2164）。
+    // 不排队 —— 排队会把延迟打满，快速失败让客户端有机会重试别的实例。
+    var connSem: ?Semaphore = None
+
     // 连接级对象池（reader/writer/ctx 都会跨连接复用，避免每连接重新分配）
     let readerPool: ObjectPool<BufferedReader> = ObjectPool<BufferedReader>(64, 32, { => BufferedReader(4096) })
     let writerPool: ObjectPool<BufferedWriter> = ObjectPool<BufferedWriter>(64, 32, { => BufferedWriter(8192) })
@@ -55,12 +60,20 @@ public class Server {
         srv.backlogSize = 4096
         srv.bind()
         listener = srv
+        initLimiter()
         serveInternal(srv)
     }
 
     public func serve(srv: TcpServerSocket): Unit {
         listener = srv
+        initLimiter()
         serveInternal(srv)
+    }
+
+    func initLimiter(): Unit {
+        if (concurrency > 0) {
+            connSem = Some(Semaphore(concurrency))
+        }
     }
 
     func serveInternal(srv: TcpServerSocket): Unit {
@@ -70,6 +83,22 @@ public class Server {
             } catch (e: Exception) {
                 // close() 打断 accept 会抛 SocketException —— 这是正常的关闭路径
                 break
+            }
+            // 并发上限：满了立刻回 503 并关连接（照搬 fasthttp 语义，不阻塞 accept）
+            var acquired = true
+            match (connSem) {
+                case Some(sem) =>
+                    acquired = sem.tryAcquire()
+                case None => ()
+            }
+            if (!acquired) {
+                try {
+                    conn.write("HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toArray())
+                } catch (e: Exception) {}
+                try {
+                    conn.close()
+                } catch (e: Exception) {}
+                continue
             }
             openConns.fetchAdd(1)
             let id = UInt64(connIdSeq.fetchAdd(1))
@@ -81,6 +110,10 @@ public class Server {
                         conn.close()
                     } catch (e: Exception) {}
                     openConns.fetchSub(1)
+                    match (connSem) {
+                        case Some(sem) => sem.release()
+                        case None => ()
+                    }
                 }
             }
         }

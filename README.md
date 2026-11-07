@@ -102,7 +102,9 @@ cjpm **默认不开 `-O2`** —— 不写这条，性能设计全部作废。
 - [x] 对象池（per-slot 无锁 + 全局兜底）（P4）
 - [x] 每请求分配降到 **192 B**（从 1016 B 优化而来；fasthttp 是 0）
 - [ ] 每请求 0 分配（还差 192 B，主要是 read/write 的切片参数）
-- [ ] 静态文件（P5）
+- [x] 静态文件（P5）：目录索引 / Range / If-Modified-Since / 路径穿越防护
+- [ ] 并发上限（Semaphore + 503，已实现待 e2e 验证）
+- [ ] 中间件（access log / 可选 recovery）
 
 ## License
 
