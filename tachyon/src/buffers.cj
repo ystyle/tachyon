@@ -178,3 +178,8 @@ class BufferedWriter {
         return ok
     }
 }
+
+/** CRLF 字符串（避免各处手写 \r\n 字面量出错） */
+func crlf(): String {
+    return "\r\n"
+}

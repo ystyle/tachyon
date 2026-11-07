@@ -27,6 +27,7 @@ public class Server {
     public var writeTimeout: ?Duration = None
     public var idleTimeout: ?Duration = None
     public var maxRequestBodySize: Int64 = 4 * 1024 * 1024
+    public var maxConnsPerIP: Int64 = 0
     public var disableKeepalive: Bool = false
     public var reduceMemoryUsage: Bool = true
     public var getOnly: Bool = false
@@ -43,11 +44,15 @@ public class Server {
     // 并发连接上限：拿不到名额回 503 并关连接（照搬 fasthttp server.go:2152-2164）。
     // 不排队 —— 排队会把延迟打满，快速失败让客户端有机会重试别的实例。
     var connSem: ?Semaphore = None
+    // per-IP 并发连接计数（maxConnsPerIP > 0 时生效）
+    let perIPLock: Mutex = Mutex()
+    let perIPCounts: HashMap<String, Int64> = HashMap<String, Int64>()
 
     // 连接级对象池（reader/writer/ctx 都会跨连接复用，避免每连接重新分配）
-    let readerPool: ObjectPool<BufferedReader> = ObjectPool<BufferedReader>(64, 32, { => BufferedReader(4096) })
-    let writerPool: ObjectPool<BufferedWriter> = ObjectPool<BufferedWriter>(64, 32, { => BufferedWriter(8192) })
-    let ctxPool: ObjectPool<RequestCtx> = ObjectPool<RequestCtx>(64, 32, { => RequestCtx(4096) })
+    // 池在 initLimiter 时按 readBufferSize / writeBufferSize 创建（配置必须在建池前定好）
+    var readerPool: ?ObjectPool<BufferedReader> = None
+    var writerPool: ?ObjectPool<BufferedWriter> = None
+    var ctxPool: ?ObjectPool<RequestCtx> = None
 
     public init(handler: RequestHandler) {
         this.handler = handler
@@ -74,6 +79,11 @@ public class Server {
         if (concurrency > 0) {
             connSem = Some(Semaphore(concurrency))
         }
+        // 按配置建池：readBufferSize / writeBufferSize 在这里才真正生效
+        let slotCount: Int64 = if (concurrency > 0) { concurrency / 64 + 1 } else { 64 }
+        readerPool = Some(ObjectPool<BufferedReader>(slotCount, 32, { => BufferedReader(readBufferSize) }))
+        writerPool = Some(ObjectPool<BufferedWriter>(slotCount, 32, { => BufferedWriter(writeBufferSize) }))
+        ctxPool = Some(ObjectPool<RequestCtx>(slotCount, 32, { => RequestCtx(4096) }))
     }
 
     func serveInternal(srv: TcpServerSocket): Unit {
@@ -91,6 +101,33 @@ public class Server {
                     acquired = sem.tryAcquire()
                 case None => ()
             }
+            // per-IP 并发上限（fasthttp 的 MaxConnsPerIP 语义：超了回 429）
+            let ipKey: String = if (maxConnsPerIP > 0) { ipOf(conn) } else { "" }
+            if (maxConnsPerIP > 0) {
+                var over = false
+                synchronized(perIPLock) {
+                    let cur = match (perIPCounts.get(ipKey)) {
+                        case Some(v) => v
+                        case None => 0
+                    }
+                    if (cur >= maxConnsPerIP) {
+                        over = true
+                    } else {
+                        perIPCounts[ipKey] = cur + 1
+                    }
+                }
+                if (over) {
+                    try {
+                        conn.write(("HTTP/1.1 429 Too Many Requests" + crlf() + "Content-Length: 0" + crlf() +
+                            "Connection: close" + crlf() + crlf()).toArray())
+                    } catch (e: Exception) {}
+                    try {
+                        conn.close()
+                    } catch (e: Exception) {}
+                    continue
+                }
+            }
+
             if (!acquired) {
                 try {
                     conn.write("HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toArray())
@@ -114,8 +151,63 @@ public class Server {
                         case Some(sem) => sem.release()
                         case None => ()
                     }
+                    if (maxConnsPerIP > 0 && ipKey.size > 0) {
+                        synchronized(perIPLock) {
+                            let cur = match (perIPCounts.get(ipKey)) {
+                                case Some(v) => v
+                                case None => 0
+                            }
+                            if (cur > 1) {
+                                perIPCounts[ipKey] = cur - 1
+                            } else {
+                                perIPCounts.remove(ipKey)
+                            }
+                        }
+                    }
                 }
             }
+        }
+    }
+
+    func takeReader(slot: Int64): BufferedReader {
+        match (readerPool) {
+            case Some(p) => return p.get(slot)
+            case None => return BufferedReader(readBufferSize)
+        }
+    }
+
+    func takeWriter(slot: Int64): BufferedWriter {
+        match (writerPool) {
+            case Some(p) => return p.get(slot)
+            case None => return BufferedWriter(writeBufferSize)
+        }
+    }
+
+    func takeCtx(slot: Int64): RequestCtx {
+        match (ctxPool) {
+            case Some(p) => return p.get(slot)
+            case None => return RequestCtx(4096)
+        }
+    }
+
+    func giveBackReader(slot: Int64, r: BufferedReader): Unit {
+        match (readerPool) {
+            case Some(p) => p.put(slot, r)
+            case None => ()
+        }
+    }
+
+    func giveBackWriter(slot: Int64, w: BufferedWriter): Unit {
+        match (writerPool) {
+            case Some(p) => p.put(slot, w)
+            case None => ()
+        }
+    }
+
+    func giveBackCtx(slot: Int64, c: RequestCtx): Unit {
+        match (ctxPool) {
+            case Some(p) => p.put(slot, c)
+            case None => ()
         }
     }
 
@@ -141,9 +233,9 @@ public class Server {
 
     func perConnLoop(conn: TcpSocket, connId: UInt64): Unit {
         let slot = Int64(connId % 64)
-        let reader = readerPool.get(slot)
-        let writer = writerPool.get(slot)
-        let ctx = ctxPool.get(slot)
+        let reader = takeReader(slot)
+        let writer = takeWriter(slot)
+        let ctx = takeCtx(slot)
         ctx.connID = connId
         ctx.remoteAddr = try {
             conn.remoteAddress
@@ -214,6 +306,14 @@ public class Server {
             // 消费 header 字节
             reader.discard(headerEnd)
 
+            // getOnly：只服务 GET / HEAD（fasthttp 的 GetOnly 语义）
+            if (getOnly && !ctx.req.isGet && !ctx.req.isHead) {
+                let err = "HTTP/1.1 400 Bad Request" + crlf() + "Content-Length: 0" + crlf() + "Connection: close" + crlf() + crlf()
+                writer.writeString(err)
+                writer.flush(conn)
+                return
+            }
+
             // ---- 3. 读 body ----
             if (!readBody(conn, reader, ctx)) {
                 return
@@ -249,6 +349,10 @@ public class Server {
             }
 
             // ---- 6. 写响应 ----
+            match (writeTimeout) {
+                case Some(d) => conn.writeTimeout = d
+                case None => conn.writeTimeout = None
+            }
             ctx.resp.skipBody = ctx.req.isHead
             let written = ctx.resp.serialize(writer, name, dateCache.line(), dateCache.lineLen())
             if (written < 0) {
@@ -275,9 +379,9 @@ public class Server {
             reader.w = 0
             writer.reset()
         }
-        readerPool.put(slot, reader)
-        writerPool.put(slot, writer)
-        ctxPool.put(slot, ctx)
+        giveBackReader(slot, reader)
+        giveBackWriter(slot, writer)
+        giveBackCtx(slot, ctx)
     }
 
     /** 读 body；成功返回 true，失败返回 false（连接应关闭） */
@@ -342,5 +446,23 @@ public class Server {
         }
         ctx.req.body = Bytes(buf)
         return true
+    }
+}
+/** 取连接的远端 IP（不含端口），用于 per-IP 计数 */
+func ipOf(conn: TcpSocket): String {
+    try {
+        let addr = conn.remoteAddress
+        let s = addr.toString()
+        // "127.0.0.1:54321" -> "127.0.0.1"
+        let i = match (s.lastIndexOf(":")) {
+            case Some(v) => v
+            case None => -1
+        }
+        if (i > 0) {
+            return s[0..i]
+        }
+        return s
+    } catch (e: Exception) {
+        return ""
     }
 }
