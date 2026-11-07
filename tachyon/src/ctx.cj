@@ -131,6 +131,35 @@ public class RequestCtx {
         return resp.statusCode
     }
 
+    /** 遍历所有请求头（含特殊头），回调返回 false 提前终止 */
+    public func visitHeaders(f: (Bytes, Bytes) -> Bool): Unit {
+        // 特殊头先访问（与 fasthttp 的 VisitAll 顺序一致）
+        if (!req.header.host.isEmpty()) {
+            if (!f(Bytes("Host".toArray()), req.header.host)) { return }
+        }
+        if (!req.header.contentLengthBytes.isEmpty()) {
+            if (!f(Bytes("Content-Length".toArray()), req.header.contentLengthBytes)) { return }
+        }
+        if (!req.header.contentType.isEmpty()) {
+            if (!f(Bytes("Content-Type".toArray()), req.header.contentType)) { return }
+        }
+        if (!req.header.userAgent.isEmpty()) {
+            if (!f(Bytes("User-Agent".toArray()), req.header.userAgent)) { return }
+        }
+        if (!req.header.connection.isEmpty()) {
+            if (!f(Bytes("Connection".toArray()), req.header.connection)) { return }
+        }
+        // 普通头按到达顺序
+        var i: Int64 = 0
+        let n = req.header.count()
+        while (i < n) {
+            if (!f(req.header.nameAt(i), req.header.valueAt(i))) {
+                return
+            }
+            i += 1
+        }
+    }
+
     /** 读取响应头（中间件/测试用） */
     public func responseHeaderGet(name: String): Bytes {
         return resp.header.getIgnoreCase(Bytes(name.toArray()))
