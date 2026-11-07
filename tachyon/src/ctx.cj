@@ -22,6 +22,8 @@ public class RequestCtx {
     var hijackHandler: ?HijackHandler = None
     var postArgsParsed: Bool = false
     var postArgsView: ArgsView = ArgsView()
+    var multipartParsed: Bool = false
+    var multipartView: MultipartForm = MultipartForm()
 
     public init(headerCap: Int64) {
         req = Request(headerCap)
@@ -37,6 +39,8 @@ public class RequestCtx {
         hijackHandler = None
         postArgsParsed = false
         postArgsView.reset()
+        multipartParsed = false
+        multipartView = MultipartForm()
         match (userValues) {
             case Some(m) => m.clear()
             case None => ()
@@ -84,6 +88,22 @@ public class RequestCtx {
             }
         }
         return postArgsView
+    }
+
+    /**
+     * multipart/form-data 表单（惰性解析，对应 fasthttp 的 ctx.MultipartForm()）。
+     * Content-Type 不是 multipart 时返回空表单。
+     */
+    public func multipartForm(): MultipartForm {
+        if (!multipartParsed) {
+            multipartParsed = true
+            match (extractBoundary(req.header.contentType)) {
+                case Some(b) =>
+                    multipartView = parseMultipart(req.body, b)
+                case None => ()
+            }
+        }
+        return multipartView
     }
 
     /** 表单value（QueryArgs 优先于 PostArgs，对齐 fasthttp 的 FormValue 语义） */
