@@ -19,6 +19,8 @@ public class RequestCtx {
     var writeDeadline: ?Duration = None
     var userValues: ?HashMap<String, Object> = None
     var hijackHandler: ?HijackHandler = None
+    var postArgsParsed: Bool = false
+    var postArgsView: ArgsView = ArgsView()
 
     public init(headerCap: Int64) {
         req = Request(headerCap)
@@ -32,6 +34,8 @@ public class RequestCtx {
         readDeadline = None
         writeDeadline = None
         hijackHandler = None
+        postArgsParsed = false
+        postArgsView.reset()
         match (userValues) {
             case Some(m) => m.clear()
             case None => ()
@@ -63,6 +67,32 @@ public class RequestCtx {
     public func requestURI(): Bytes { return req.requestURI }
     public func path(): Bytes { return req.path() }
     public func queryArgs(): ArgsView { return req.queryArgs() }
+
+    /**
+     * POST 表单参数（application/x-www-form-urlencoded）。
+     *
+     * 惰性解析 body；Content-Type 不是表单格式时返回空。多部分表单（multipart）
+     * 不支持 —— 那需要 stdx 或自己实现 boundary 解析，属于扩展范畴。
+     */
+    public func postArgs(): ArgsView {
+        if (!postArgsParsed) {
+            postArgsParsed = true
+            let ct = req.header.contentType
+            if (!ct.isEmpty() && ct.startsWith("application/x-www-form-urlencoded".toArray())) {
+                postArgsView.parse(req.body)
+            }
+        }
+        return postArgsView
+    }
+
+    /** 表单value（QueryArgs 优先于 PostArgs，对齐 fasthttp 的 FormValue 语义） */
+    public func formValue(key: String): Bytes {
+        let qv = queryArgs().get(key)
+        if (!qv.isEmpty()) {
+            return qv
+        }
+        return postArgs().get(key)
+    }
     public func host(): Bytes { return req.header.host }
     public func userAgent(): Bytes { return req.header.userAgent }
     public func body(): Bytes { return req.body }
