@@ -21,6 +21,11 @@ import std.io.InputStream
 public class MultipartForm {
     var fields: ArrayList<MultipartPart> = ArrayList<MultipartPart>()
 
+    /** 只清空不重建（reset 在每请求热路径上，不能 new） */
+    public func reset(): Unit {
+        fields.clear()
+    }
+
     public func field(name: String): ?Bytes {
         var i: Int64 = 0
         while (i < fields.size) {

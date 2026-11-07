@@ -40,7 +40,7 @@ public class RequestCtx {
         postArgsParsed = false
         postArgsView.reset()
         multipartParsed = false
-        multipartView = MultipartForm()
+        multipartView.reset()
         match (userValues) {
             case Some(m) => m.clear()
             case None => ()
