@@ -17,6 +17,8 @@ class Response {
     var bodyStream: ?InputStream = None
     var bodyStreamSize: Int64 = 0
     var bodyStreamChunked: Bool = false
+    // 热路径用 bool 判断（Option 的 match 在每请求上都有开销）
+    var hasStream: Bool = false
 
     // 自动头的开关
     var noDefaultContentType: Bool = false
@@ -36,6 +38,7 @@ class Response {
         bodyStream = None
         bodyStreamSize = 0
         bodyStreamChunked = false
+        hasStream = false
         skipBody = false
         connectionClose = false
     }
@@ -60,20 +63,16 @@ class Response {
         bodyStream = Some(stream)
         bodyStreamSize = size
         bodyStreamChunked = size < 0
+        hasStream = true
     }
 
     func isStreaming(): Bool {
-        match (bodyStream) {
-            case Some(_) => return true
-            case None => return false
-        }
+        return hasStream
     }
 
     func bodyLength(): Int64 {
-        match (bodyStream) {
-            case Some(_) =>
-                return if (bodyStreamSize >= 0) { bodyStreamSize } else { 0 }
-            case None => ()
+        if (hasStream) {
+            return if (bodyStreamSize >= 0) { bodyStreamSize } else { 0 }
         }
         if (bodyStr.size > 0) {
             return bodyStr.size
