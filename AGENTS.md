@@ -7,7 +7,9 @@ fasthttp 风格、零分配的仓颉 HTTP/1.1 服务端。**仅依赖 `std.*`**�
 1. **主模块零 stdx**。`tachyon/cjpm.toml` 与 `tachyon/src/` 里不得出现任何 stdx 相关配置或 import。
    判据（CI 必须跑）：
    ```shell
-   ! grep -rq 'stdx' tachyon/cjpm.toml tachyon/src/ || (echo "主模块引入了 stdx!"; exit 1)
+   # 只查真正会传染的两种：import 语句、cjpm.toml 里的依赖配置。
+   # 注释里提到 stdx（比如"不做 ETag，因为需要 stdx 的摘要"）是允许的。
+   ! grep -rqnE '^\s*import\s+stdx|stdx.*=.*"' tachyon/cjpm.toml tachyon/src/      || (echo "主模块引入了 stdx!"; exit 1)
    ```
    原因：仓颉**没有条件编译**，依赖树里任一包 import stdx，整条链的 `cjpm build` 都要
    `${CANGJIE_STDX_PATH}`，且没被用到的 stdx 包也照编。主模块必须对所有下游零配置。
