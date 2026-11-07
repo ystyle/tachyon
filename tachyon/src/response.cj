@@ -1,5 +1,7 @@
 package ystyle::tachyon
 
+import std.io.InputStream
+
 /**
  * 响应。序列化顺序照抄 fasthttp（顺序是协议 + 兼容性要求）：
  *   状态行 -> Server -> Date -> Content-Type -> Content-Length -> 用户头 -> Set-Cookie -> Connection
@@ -10,6 +12,11 @@ class Response {
     var body: Bytes = Bytes.empty()
     // 直接持有 String（不 toArray），序列化时逐字节写；避免每请求一次 Array 分配
     var bodyStr: String = ""
+
+    // 流式 body：size >= 0 定长，size < 0 chunked
+    var bodyStream: ?InputStream = None
+    var bodyStreamSize: Int64 = 0
+    var bodyStreamChunked: Bool = false
 
     // 自动头的开关
     var noDefaultContentType: Bool = false
@@ -26,6 +33,9 @@ class Response {
         header.reset()
         body = Bytes.empty()
         bodyStr = ""
+        bodyStream = None
+        bodyStreamSize = 0
+        bodyStreamChunked = false
         skipBody = false
         connectionClose = false
     }
@@ -37,9 +47,34 @@ class Response {
     func setBodyString(s: String): Unit {
         body = Bytes.empty()
         bodyStr = s
+        bodyStream = None
+    }
+
+    /**
+     * 流式 body。size >= 0 已知长度（定长发送）；size < 0 未知（chunked）。
+     * 对应 fasthttp 的 Response.SetBodyStream。
+     */
+    func setBodyStream(stream: InputStream, size: Int64): Unit {
+        body = Bytes.empty()
+        bodyStr = ""
+        bodyStream = Some(stream)
+        bodyStreamSize = size
+        bodyStreamChunked = size < 0
+    }
+
+    func isStreaming(): Bool {
+        match (bodyStream) {
+            case Some(_) => return true
+            case None => return false
+        }
     }
 
     func bodyLength(): Int64 {
+        match (bodyStream) {
+            case Some(_) =>
+                return if (bodyStreamSize >= 0) { bodyStreamSize } else { 0 }
+            case None => ()
+        }
         if (bodyStr.size > 0) {
             return bodyStr.size
         }
@@ -208,6 +243,30 @@ func appendInt64(dst: Array<Byte>, p0: Int64, v0: Int64): Int64 {
         tmp[n] = UInt8(v % 10 + 48)
         n += 1
         v = v / 10
+    }
+    while (n > 0) {
+        n -= 1
+        dst[p] = tmp[n]
+        p += 1
+    }
+    return p
+}
+
+/** 写小写十六进制（chunk-size 用） */
+func appendHexInt(dst: Array<Byte>, p0: Int64, v0: Int64): Int64 {
+    var p = p0
+    if (v0 == 0) {
+        dst[p] = 48
+        return p + 1
+    }
+    var v = v0
+    let tmp = Array<Byte>(20, repeat: 0)
+    var n: Int64 = 0
+    while (v > 0) {
+        let d = v % 16
+        tmp[n] = if (d < 10) { UInt8(d + 48) } else { UInt8(d - 10 + 97) }
+        n += 1
+        v = v / 16
     }
     while (n > 0) {
         n -= 1

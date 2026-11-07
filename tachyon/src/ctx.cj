@@ -1,6 +1,7 @@
 package ystyle::tachyon
 
 import std.net.{SocketAddress, TcpSocket}
+import std.io.InputStream
 import std.collection.HashMap
 
 /**
@@ -209,6 +210,13 @@ public class RequestCtx {
 
     public func setBodyArray(a: Array<Byte>): Unit {
         resp.setBody(Bytes(a))
+    }
+
+    /**
+     * 对应 fasthttp 的 SetBodyStream。
+     */
+    public func setBodyStream(stream: InputStream, size: Int64): Unit {
+        resp.setBodyStream(stream, size)
     }
 
     public func setConnectionClose(): Unit {

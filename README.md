@@ -107,7 +107,8 @@ cjpm **默认不开 `-O2`** —— 不写这条，性能设计全部作废。
 - [x] 全部 Server 配置项生效（getOnly / maxConnsPerIP / readBufferSize / writeTimeout / ...）
 - [x] 中间件：access log / recovery / requestID / CORS / bodyLimit（Server.use）
 - [x] Hijack（ctx.hijack，把连接交给使用者 —— 第三方实现 WS / CONNECT 的途径）
-- [x] 45 个单元测试
+- [x] SetBodyStream 流式响应（定长 / chunked）
+- [x] 51 个单元测试
 
 ## License
 

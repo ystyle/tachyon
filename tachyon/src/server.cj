@@ -376,6 +376,18 @@ public class Server {
                 case None => conn.writeTimeout = None
             }
             ctx.resp.skipBody = ctx.req.isHead
+
+            // 流式 body 走单独的写出路径（不走 header+body 一次 write 的快路径）
+            if (ctx.resp.isStreaming()) {
+                if (!writeStreamingResponse(conn, writer, ctx)) {
+                    return
+                }
+                if (close) {
+                    alive = false
+                }
+                ctx.reset()
+                continue
+            }
             let written = ctx.resp.serialize(writer, name, dateCache.line(), dateCache.lineLen())
             if (written < 0) {
                 // 写缓冲装不下：直接 flush 后回 500（极端情况）
@@ -404,6 +416,115 @@ public class Server {
         giveBackReader(slot, reader)
         giveBackWriter(slot, writer)
         giveBackCtx(slot, ctx)
+    }
+
+
+    /**
+     * 写流式响应。header 先写（chunked 用 Transfer-Encoding，定长用 Content-Length），
+     * 然后从 InputStream 逐块读出并写出。返回 false 表示连接应关闭。
+     */
+    func writeStreamingResponse(conn: TcpSocket, writer: BufferedWriter, ctx: RequestCtx): Bool {
+        writer.reset()
+        let dst = writer.buf
+        var p: Int64 = 0
+
+        p = appendString(dst, p, "HTTP/1.1 ")
+        p = appendUInt16(dst, p, ctx.resp.statusCode)
+        let text = statusText(ctx.resp.statusCode)
+        if (text.size > 0) {
+            p = appendByte(dst, p, 32)
+            p = appendString(dst, p, text)
+        }
+        p = appendCRLF(dst, p)
+        p = appendString(dst, p, "Server: ")
+        p = appendString(dst, p, name)
+        p = appendCRLF(dst, p)
+        let dlen = dateCache.lineLen()
+        if (dlen > 0) {
+            let dbuf = dateCache.line()
+            var di: Int64 = 0
+            while (di < dlen) {
+                dst[p] = dbuf[di]
+                p += 1
+                di += 1
+            }
+        }
+        if (ctx.resp.bodyStreamChunked) {
+            p = appendString(dst, p, "Transfer-Encoding: chunked" + crlf())
+        } else {
+            p = appendString(dst, p, "Content-Length: ")
+            p = appendInt64(dst, p, ctx.resp.bodyStreamSize)
+            p = appendCRLF(dst, p)
+        }
+        if (ctx.resp.connectionClose) {
+            p = appendString(dst, p, "Connection: close" + crlf())
+        }
+        p = appendCRLF(dst, p)
+        writer.commit(p)
+        if (!writer.flush(conn)) {
+            return false
+        }
+        if (ctx.resp.skipBody) {
+            return true
+        }
+
+        let buf = Array<Byte>(8192, repeat: 0)
+        match (ctx.resp.bodyStream) {
+            case Some(stream) =>
+                var guard: Int64 = 0
+                while (guard < 1000000) {
+                    guard += 1
+                    let n = try {
+                        stream.read(buf)
+                    } catch (e: Exception) {
+                        0
+                    }
+                    if (n <= 0) {
+                        break
+                    }
+                    if (ctx.resp.bodyStreamChunked) {
+                        let hdr = Array<Byte>(32, repeat: 0)
+                        var hp: Int64 = 0
+                        hp = appendHexInt(hdr, hp, n)
+                        hdr[hp] = 13
+                        hdr[hp + 1] = 10
+                        hp += 2
+                        if (!writeRaw(conn, hdr, hp)) {
+                            return false
+                        }
+                        if (!writeRaw(conn, buf, n)) {
+                            return false
+                        }
+                        let tail: Array<Byte> = [13, 10]
+                        if (!writeRaw(conn, tail, 2)) {
+                            return false
+                        }
+                    } else {
+                        if (!writeRaw(conn, buf, n)) {
+                            return false
+                        }
+                    }
+                }
+                if (ctx.resp.bodyStreamChunked) {
+                    let endMarker = "0" + crlf() + crlf()
+                    let em = endMarker.toArray()
+                    if (!writeRaw(conn, em, em.size)) {
+                        return false
+                    }
+                }
+            case None => ()
+        }
+        return true
+    }
+
+    /** 直接把前 n 字节写到 socket */
+    func writeRaw(conn: TcpSocket, buf: Array<Byte>, n: Int64): Bool {
+        return try {
+            conn.write(buf[0..n])
+            true
+        } catch (e: Exception) {
+            false
+        }
     }
 
     /** 读 body；成功返回 true，失败返回 false（连接应关闭） */
