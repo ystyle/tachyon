@@ -39,6 +39,11 @@ public class Server {
     var connIdSeq: AtomicInt64 = AtomicInt64(0)
     let connLock: Mutex = Mutex()
 
+    // 连接级对象池（reader/writer/ctx 都会跨连接复用，避免每连接重新分配）
+    let readerPool: ObjectPool<BufferedReader> = ObjectPool<BufferedReader>(64, 32, { => BufferedReader(4096) })
+    let writerPool: ObjectPool<BufferedWriter> = ObjectPool<BufferedWriter>(64, 32, { => BufferedWriter(8192) })
+    let ctxPool: ObjectPool<RequestCtx> = ObjectPool<RequestCtx>(64, 32, { => RequestCtx(4096) })
+
     public init(handler: RequestHandler) {
         this.handler = handler
         this.dateCache.start()
@@ -102,9 +107,10 @@ public class Server {
     }
 
     func perConnLoop(conn: TcpSocket, connId: UInt64): Unit {
-        let reader = BufferedReader(readBufferSize)
-        let writer = BufferedWriter(writeBufferSize)
-        let ctx = RequestCtx(4096)
+        let slot = Int64(connId % 64)
+        let reader = readerPool.get(slot)
+        let writer = writerPool.get(slot)
+        let ctx = ctxPool.get(slot)
         ctx.connID = connId
         ctx.remoteAddr = try {
             conn.remoteAddress
@@ -211,7 +217,7 @@ public class Server {
 
             // ---- 6. 写响应 ----
             ctx.resp.skipBody = ctx.req.isHead
-            let written = ctx.resp.serialize(writer, name, dateCache.line())
+            let written = ctx.resp.serialize(writer, name, dateCache.line(), dateCache.lineLen())
             if (written < 0) {
                 // 写缓冲装不下：直接 flush 后回 500（极端情况）
                 let err = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
@@ -230,6 +236,15 @@ public class Server {
             // ---- 7. 复位 ----
             ctx.reset()
         }
+        // 连接结束：把对象还给池（reduceMemoryUsage 时缓冲也归零，避免钉住大块内存）
+        if (reduceMemoryUsage) {
+            reader.r = 0
+            reader.w = 0
+            writer.reset()
+        }
+        readerPool.put(slot, reader)
+        writerPool.put(slot, writer)
+        ctxPool.put(slot, ctx)
     }
 
     /** 读 body；成功返回 true，失败返回 false（连接应关闭） */

@@ -8,6 +8,8 @@ class Response {
     var statusCode: UInt16 = 200
     var header: HeaderTable
     var body: Bytes = Bytes.empty()
+    // 直接持有 String（不 toArray），序列化时逐字节写；避免每请求一次 Array 分配
+    var bodyStr: String = ""
 
     // 自动头的开关
     var noDefaultContentType: Bool = false
@@ -23,6 +25,7 @@ class Response {
         statusCode = 200
         header.reset()
         body = Bytes.empty()
+        bodyStr = ""
         skipBody = false
         connectionClose = false
     }
@@ -32,7 +35,15 @@ class Response {
     }
 
     func setBodyString(s: String): Unit {
-        body = Bytes(s.toArray())
+        body = Bytes.empty()
+        bodyStr = s
+    }
+
+    func bodyLength(): Int64 {
+        if (bodyStr.size > 0) {
+            return bodyStr.size
+        }
+        return body.size()
     }
 
     func setStatusCode(code: UInt16): Unit {
@@ -44,7 +55,7 @@ class Response {
     }
 
     /** 序列化到写缓冲。返回实际写入的字节数，-1 表示缓冲装不下 */
-    func serialize(w: BufferedWriter, serverName: String, dateLine: Array<Byte>): Int64 {
+    func serialize(w: BufferedWriter, serverName: String, dateBuf: Array<Byte>, dateLen: Int64): Int64 {
         w.reset()
         let dst = w.buf
         var p: Int64 = 0
@@ -67,13 +78,18 @@ class Response {
             p = appendCRLF(dst, p)
         }
 
-        // 3. Date（缓存行，直接 memcpy）
-        if (!noDefaultDate && dateLine.size > 0) {
-            p = appendArray(dst, p, dateLine)
+        // 3. Date（缓存行，直接按有效长度 memcpy）
+        if (!noDefaultDate && dateLen > 0) {
+            var di: Int64 = 0
+            while (di < dateLen) {
+                dst[p] = dateBuf[di]
+                p += 1
+                di += 1
+            }
         }
 
         let skipBodyHere = skipBody || mustSkipBody(statusCode)
-        let bodyLen: Int64 = if (skipBodyHere) { 0 } else { body.size() }
+        let bodyLen: Int64 = if (skipBodyHere) { 0 } else { bodyLength() }
 
         // 4. Content-Type（仅当有 body 或显式设置）
         let ct = header.contentType
@@ -117,7 +133,15 @@ class Response {
             if (p + bodyLen > cap) {
                 return -1
             }
-            p = body.copyTo(dst, p)
+            if (bodyStr.size > 0) {
+                // 逐字节写 String，避免 toArray 分配
+                for (b in bodyStr) {
+                    dst[p] = b
+                    p += 1
+                }
+            } else {
+                p = body.copyTo(dst, p)
+            }
         }
         w.commit(p)
         return p
@@ -135,9 +159,15 @@ func appendCRLF(dst: Array<Byte>, p: Int64): Int64 {
     return p + 2
 }
 
-func appendString(dst: Array<Byte>, p: Int64, s: String): Int64 {
-    let a = s.toArray()
-    return appendArray(dst, p, a)
+func appendString(dst: Array<Byte>, p0: Int64, s: String): Int64 {
+    // 直接遍历 String 的 UTF-8 字节（迭代 String 拿到的就是 UInt8），
+    // 避免 s.toArray() 的每请求分配
+    var p = p0
+    for (b in s) {
+        dst[p] = b
+        p += 1
+    }
+    return p
 }
 
 func appendArray(dst: Array<Byte>, p0: Int64, a: Array<Byte>): Int64 {

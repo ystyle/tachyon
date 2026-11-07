@@ -96,10 +96,12 @@ cjpm **默认不开 `-O2`** —— 不写这条，性能设计全部作废。
 - [x] `Response` 序列化（fasthttp 顺序）
 - [x] `DateCache`
 - [x] `Server` 主循环（keep-alive / 超时 / 优雅关闭）
-- [x] 17 个单元测试
-- [ ] chunked body（P3）
-- [ ] 对象池 + buffer 复用（P4）
-- [ ] 每请求 0 分配验收（P4）
+- [x] chunked transfer-encoding（P3）
+- [x] Cookie（请求解析 + Set-Cookie 序列化）（P3）
+- [x] 27 个单元测试
+- [x] 对象池（per-slot 无锁 + 全局兜底）（P4）
+- [x] 每请求分配降到 **192 B**（从 1016 B 优化而来；fasthttp 是 0）
+- [ ] 每请求 0 分配（还差 192 B，主要是 read/write 的切片参数）
 - [ ] 静态文件（P5）
 
 ## License

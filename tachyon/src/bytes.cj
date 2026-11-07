@@ -1,5 +1,8 @@
 package ystyle::tachyon
 
+/** 共享的零长视图，避免每次 Bytes.empty() 分配 */
+let EMPTY_BYTES: Bytes = Bytes(Array<Byte>(0, repeat: 0), 0, 0)
+
 /**
  * 零拷贝字节视图。
  *
@@ -28,7 +31,7 @@ public struct Bytes {
     }
 
     public static func empty(): Bytes {
-        return Bytes(Array<Byte>(0, repeat: 0), 0, 0)
+        return EMPTY_BYTES
     }
 
     public func size(): Int64 {

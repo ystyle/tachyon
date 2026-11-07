@@ -45,9 +45,13 @@ class DateCache {
         }
     }
 
-    /** 返回当前缓存行的视图（只含有效字节；array 是固定 64 字节，必须裁剪） */
+    /**
+     * 当前缓存行的**原始缓冲**（固定 64 字节，尾部可能有无意义字节）。
+     * 调用方必须同时用 lineLen() 取有效长度，不能直接整块写出。
+     * 刻意不返回 buf[0..len] 切片：切片的 Array 头是每请求一次分配。
+     */
     func line(): Array<Byte> {
-        synchronized(lock) { return buf[0..len] }
+        return buf
     }
 
     func lineLen(): Int64 {
