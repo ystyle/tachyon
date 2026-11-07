@@ -1,0 +1,16 @@
+[package]
+  cjc-version = "1.2.0"
+  name = "tachyon"
+  organization = "ystyle"
+  version = "0.1.0"
+  description = "A fasthttp-style zero-allocation HTTP/1.1 server for Cangjie (std-only)"
+  output-type = "static"
+  src-dir = "src"
+  compile-option = "-O2 -Woff unused"
+  link-option = ""
+  include = ["/src", "/LICENSE"]
+  exclude = ["/docs", "/bench", "/scripts", "/target", "AGENTS.md"]
+  license = ["MulanPSL-2.0"]
+  authors = ["ystyle"]
+  repository = "https://atomgit.com/ystyle/tachyon"
+  tag = ["http", "server", "fasthttp", "performance"]

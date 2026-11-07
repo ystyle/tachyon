@@ -1,0 +1,12 @@
+[dependencies]
+  "ystyle::tachyon" = { path = "../tachyon" }
+
+[package]
+  cjc-version = "1.2.0"
+  name = "tachyon_tests"
+  organization = "ystyle"
+  version = "0.1.0"
+  description = "Integration tests for tachyon"
+  output-type = "executable"
+  src-dir = "src"
+  compile-option = "-O2 -Woff unused"

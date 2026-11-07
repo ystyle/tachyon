@@ -1,0 +1,9 @@
+[workspace]
+  members = ["tachyon", "tachyon_tests"]
+  build-members = ["tachyon", "tachyon_tests"]
+  test-members = ["tachyon_tests"]
+  compile-option = ""
+  override-compile-option = ""
+  link-option = ""
+  target-dir = ""
+  script-dir = ""

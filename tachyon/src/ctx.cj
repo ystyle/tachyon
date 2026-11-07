@@ -1,0 +1,162 @@
+package ystyle::tachyon
+
+import std.net.SocketAddress
+import std.collection.HashMap
+
+/**
+ * 请求上下文。每连接复用一个实例（reset 只截断不释放）。
+ *
+ * 与 fasthttp 一致：handler 返回后 ctx 会被复用，**不要把 ctx 或它的字节视图
+ * 存到 handler 之外**。
+ */
+public class RequestCtx {
+    var req: Request
+    var resp: Response
+    var remoteAddr: ?SocketAddress = None
+    var connID: UInt64 = 0
+    var connRequestNum: UInt64 = 0
+    var readDeadline: ?Duration = None
+    var writeDeadline: ?Duration = None
+    var userValues: ?HashMap<String, Object> = None
+
+    init(headerCap: Int64) {
+        req = Request(headerCap)
+        resp = Response(headerCap)
+    }
+
+    internal func reset(): Unit {
+        req.reset()
+        resp.reset()
+        connRequestNum += 1
+        readDeadline = None
+        writeDeadline = None
+        match (userValues) {
+            case Some(m) => m.clear()
+            case None => ()
+        }
+    }
+
+    // ---- 请求侧（只读视图）----
+    public func method(): Bytes { return req.method }
+    public func requestURI(): Bytes { return req.requestURI }
+    public func path(): Bytes { return req.path() }
+    public func queryArgs(): ArgsView { return req.queryArgs() }
+    public func host(): Bytes { return req.header.host }
+    public func userAgent(): Bytes { return req.header.userAgent }
+    public func body(): Bytes { return req.body }
+    public func isTLS(): Bool { return false }
+    public func isHTTP11(): Bool { return req.isHTTP11 }
+
+    public func headerGet(name: String): Bytes {
+        return req.headerGetStr(name)
+    }
+
+    public func isGet(): Bool { return req.isGet }
+    public func isHead(): Bool { return req.isHead }
+    public func isPost(): Bool { return req.method.equals(Bytes("POST".toArray())) }
+    public func isPut(): Bool { return req.method.equals(Bytes("PUT".toArray())) }
+    public func isDelete(): Bool { return req.method.equals(Bytes("DELETE".toArray())) }
+    public func isOptions(): Bool { return req.method.equals(Bytes("OPTIONS".toArray())) }
+
+    // ---- 响应侧 ----
+    public func setStatusCode(code: UInt16): Unit {
+        resp.setStatusCode(code)
+    }
+
+    public func statusCode(): UInt16 {
+        return resp.statusCode
+    }
+
+    public func setContentType(ct: String): Unit {
+        resp.setContentType(ct)
+    }
+
+    public func setHeader(name: String, value: String): Unit {
+        // 支持覆盖：先找同名，找到就替换
+        let nb = Bytes(name.toArray())
+        var i: Int64 = 0
+        let n = resp.header.count()
+        while (i < n) {
+            if (resp.header.nameAt(i).equalsAsciiIgnoreCase(nb)) {
+                resp.header.values[i] = resp.header.copyIn(value.toArray(), 0, value.toArray().size)
+                return
+            }
+            i += 1
+        }
+        resp.header.add(
+            resp.header.copyIn(name.toArray(), 0, name.toArray().size),
+            resp.header.copyIn(value.toArray(), 0, value.toArray().size)
+        )
+    }
+
+    public func addHeader(name: String, value: String): Unit {
+        resp.header.add(
+            resp.header.copyIn(name.toArray(), 0, name.toArray().size),
+            resp.header.copyIn(value.toArray(), 0, value.toArray().size)
+        )
+    }
+
+    public func setBody(b: Bytes): Unit {
+        resp.setBody(b)
+    }
+
+    public func setBodyString(s: String): Unit {
+        resp.setBodyString(s)
+    }
+
+    public func setBodyArray(a: Array<Byte>): Unit {
+        resp.setBody(Bytes(a))
+    }
+
+    public func setConnectionClose(): Unit {
+        resp.connectionClose = true
+        req.connectionClose = true
+    }
+
+    public func success(contentType: String, b: Bytes): Unit {
+        setStatusCode(200)
+        setContentType(contentType)
+        setBody(b)
+    }
+
+    public func successString(contentType: String, s: String): Unit {
+        setStatusCode(200)
+        setContentType(contentType)
+        setBodyString(s)
+    }
+
+    public func error(msg: String, code: UInt16): Unit {
+        setStatusCode(code)
+        setContentType("text/plain; charset=utf-8")
+        setBodyString(msg)
+    }
+
+    public func redirect(uri: String, code: UInt16): Unit {
+        setStatusCode(code)
+        setHeader("Location", uri)
+    }
+
+    // ---- 逃生门 ----
+    public func setReadDeadline(d: ?Duration): Unit { readDeadline = d }
+    public func setWriteDeadline(d: ?Duration): Unit { writeDeadline = d }
+
+    // ---- 用户数据 ----
+    public func setUserValue(key: String, v: Object): Unit {
+        match (userValues) {
+            case Some(m) => m[key] = v
+            case None =>
+                let m = HashMap<String, Object>()
+                m[key] = v
+                userValues = m
+        }
+    }
+
+    public func userValue(key: String): ?Object {
+        match (userValues) {
+            case Some(m) => return m.get(key)
+            case None => return None
+        }
+    }
+}
+
+public type RequestHandler = (RequestCtx) -> Unit
