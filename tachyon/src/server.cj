@@ -359,6 +359,17 @@ public class Server {
                 ctx.resp.connectionClose = true
             }
 
+            // ---- 5.5 hijack：handler 要求接管连接 ----
+            match (ctx.hijackHandler) {
+                case Some(h) =>
+                    let pending = reader.available()
+                    let hc = HijackedConn(conn, pending)
+                    // 不发响应，直接把连接交出去；返回后由 handler 负责关闭
+                    h(hc)
+                    return
+                case None => ()
+            }
+
             // ---- 6. 写响应 ----
             match (writeTimeout) {
                 case Some(d) => conn.writeTimeout = d

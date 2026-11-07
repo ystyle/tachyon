@@ -1,6 +1,6 @@
 package ystyle::tachyon
 
-import std.net.SocketAddress
+import std.net.{SocketAddress, TcpSocket}
 import std.collection.HashMap
 
 /**
@@ -18,6 +18,7 @@ public class RequestCtx {
     var readDeadline: ?Duration = None
     var writeDeadline: ?Duration = None
     var userValues: ?HashMap<String, Object> = None
+    var hijackHandler: ?HijackHandler = None
 
     public init(headerCap: Int64) {
         req = Request(headerCap)
@@ -30,6 +31,7 @@ public class RequestCtx {
         connRequestNum += 1
         readDeadline = None
         writeDeadline = None
+        hijackHandler = None
         match (userValues) {
             case Some(m) => m.clear()
             case None => ()
@@ -178,6 +180,15 @@ public class RequestCtx {
         setHeader("Location", uri)
     }
 
+    /**
+     * 劫持连接。调用后服务端**不再**为本次请求发送响应，连接交给你。
+     *
+     * 与 fasthttp 一致：handler 返回后连接由你负责关闭。
+     */
+    public func hijack(h: HijackHandler): Unit {
+        hijackHandler = h
+    }
+
     // ---- 逃生门 ----
     public func setReadDeadline(d: ?Duration): Unit { readDeadline = d }
     public func setWriteDeadline(d: ?Duration): Unit { writeDeadline = d }
@@ -198,6 +209,28 @@ public class RequestCtx {
             case Some(m) => return m.get(key)
             case None => return None
         }
+    }
+}
+
+/** 劫持后的连接处理函数。返回后服务端不再接管这条连接。 */
+public type HijackHandler = (HijackedConn) -> Unit
+
+/**
+ * 被劫持的连接。
+ *
+ * 与 fasthttp 的 ctx.Hijack(func(net.Conn)) 对应：拿到连接后由使用者自己读写，
+ * 服务端不再发送响应、不再处理这个连接上的后续请求。
+ *
+ * 用途：协议升级（WebSocket 握手后自管帧层）、CONNECT 隧道、特殊协议。
+ */
+public class HijackedConn {
+    public let socket: TcpSocket
+    /** 已经读进缓冲但还没被消费的字节（劫持前客户端可能已经多发了数据） */
+    public let pendingBytes: Bytes
+
+    init(socket: TcpSocket, pendingBytes: Bytes) {
+        this.socket = socket
+        this.pendingBytes = pendingBytes
     }
 }
 
