@@ -371,7 +371,10 @@ profile 给出了确定答案，且**推翻了"是 tachyon 逻辑问题"和"是�
 
 ## 4.10 对着 runtime 源码看：那 16.7% 的 `sched_yield` 从哪来
 
-把 `cangjie_runtime` 拉下来（`atomgit.com/Cangjie/cangjie_runtime`，@ `e927f24`）对照 profile，
+把 `cangjie_runtime` 拉下来（`atomgit.com/Cangjie/cangjie_runtime`）对照 profile。
+**先确认版本对得上**：我们用的是 1.2.0，取 `release/1.2` 分支（HEAD `8e6100a`，即 v1.2.1）
+与该文件在 `main`（`e927f24`）做 `git diff` → **输出为空**，即两个分支逐字节一致，
+下面这段就是 1.2.0 实际跑的代码。定位到
 定位到 `runtime/src/CJThread/src/aio/sock/src/sock.cpp:1634` 的 `SockRecvNonBlockGeneral`：
 
 ```cpp
@@ -392,8 +395,9 @@ do {
 
 1. **`sched_yield()` 无条件调用**。当 `scheduleFree == false`（空闲处理器不够，或已超 15 轮）时，
    循环本来就要退出、上层马上 park 这个 cjthread —— 这次 yield 纯属多余的系统调用。
-   按 37 万 req/s、每请求至少一次 EAGAIN，相当于 **~2 µs/请求**，与 profile 的 16.7% 吻合
-   （每请求总 CPU 13.2 µs）。
+   实测 `sched_yield()` 单次约 **487 ns**（无其它可运行线程时）。
+   profile 里 16.7% × 5 核 ÷ 37 万 req/s ≈ **2.2 µs/请求**，除以 487 ns ≈ **4–5 次/请求**
+   —— 说明自旋分支也在实际触发，不只是退出前那一次。
 2. **超配时自旋判据失效**。`freeNum > processorNum/2` 在 `cjProcessorNum` 大于物理核数时
    恒成立（总有一半 processor 空闲）→ 每次读自旋满 15 轮，每轮 recv + sched_yield = 最多 30 次系统调用。
 

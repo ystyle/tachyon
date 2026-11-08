@@ -2,7 +2,10 @@
 
 ## 环境
 
-- Cangjie 1.2.0（Linux x86_64），runtime 源码参照 `cangjie_runtime` @ `e927f24`
+- Cangjie **1.2.0**（Linux x86_64）
+- 源码已按 `release/1.2` 分支（HEAD `8e6100a`，v1.2.1）核对：
+  `sock.cpp` 与 `sock_impl.h` 同 `main`（`e927f24`）**逐字节一致**，即本文描述的就是 1.2.0 实际运行的代码
+- 交叉验证：`release/1.2` 与 `main` 对该文件 `git diff` 输出为空
 - 机器：Ryzen 7 7840HS（8 核 16 线程），2.5GbE
 - 被测程序：纯 Cangjie HTTP/1.1 服务端（只回 `200 Hello, World!`），256 长连接、~37 万 req/s
 - 采样：`cjprof record -f 499 -p <pid>`（采样 10 s）
@@ -56,8 +59,9 @@ int SockRecvNonBlockGeneral(int fd, void *buf, unsigned int len, SocketFlag flag
 上层会立刻 park 这个 cjthread —— 这次 `sched_yield()` 完全是多余的。
 每个 EAGAIN 多一次系统调用。
 
-按 37 万 req/s、每请求至少一次 EAGAIN 估算，这是 ~2 µs/请求 的纯开销，
-与 profile 的 16.7% 吻合（每请求总 CPU 13.2 µs）。
+**成本实测**：单独测 `sched_yield()`（无其它可运行线程时）约 **487 ns/次**。
+profile 里 16.7% × 5 核 ÷ 37 万 req/s ≈ **2.2 µs/请求**落在 `sched_yield` 内，
+除以 487 ns 约合 **4–5 次 yield/请求** —— 说明不只是"退出前那一次"，自旋分支也在实际触发。
 
 建议：把 yield 移进真正要自旋的分支，或至少退出前不 yield：
 
