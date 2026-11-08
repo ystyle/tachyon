@@ -4,6 +4,12 @@ import std.net.{SocketAddress, TcpSocket}
 import std.io.InputStream
 import std.collection.HashMap
 
+/// 自定义错误响应。返回 true 表示已自行写出响应（服务端不再写默认的 text/plain）。
+///
+/// 对应 fasthttp 的 `Server.ErrorHandler`：
+/// 默认错误响应是「状态码 + text/plain 一行说明」，需要 JSON 错误体/自定义错误页时用这个钩子。
+public type ErrorHandler = (RequestCtx, String, UInt16) -> Bool
+
 /**
  * 请求上下文。每连接复用一个实例（reset 只截断不释放）。
  *
@@ -20,6 +26,8 @@ public class RequestCtx {
     var writeDeadline: ?Duration = None
     var userValues: ?HashMap<String, Object> = None
     var hijackHandler: ?HijackHandler = None
+    /// 自定义错误响应钩子（由 Server 注入；也可 handler 内自行设置）
+    var errHandler: ?ErrorHandler = None
     var postArgsParsed: Bool = false
     var postArgsView: ArgsView = ArgsView()
     var multipartParsed: Bool = false
@@ -269,6 +277,13 @@ public class RequestCtx {
     }
 
     public func error(msg: String, code: UInt16): Unit {
+        match (errHandler) {
+            case Some(h) =>
+                if (h(this, msg, code)) {
+                    return
+                }
+            case None => ()
+        }
         setStatusCode(code)
         setContentType("text/plain; charset=utf-8")
         setBodyString(msg)

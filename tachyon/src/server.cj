@@ -35,6 +35,8 @@ public class Server {
     public var getOnly: Bool = false
     public var noDefaultContentType: Bool = false
     public var noDefaultDate: Bool = false
+    /// 自定义错误响应（对应 fasthttp 的 ErrorHandler）。返回 true 表示已自行写出。
+    public var errorHandler: ?ErrorHandler = None
 
     // ---- 运行时状态 ----
     var stopping: AtomicBool = AtomicBool(false)
@@ -271,6 +273,7 @@ public class Server {
         } catch (e: Exception) {
             None
         }
+        ctx.errHandler = errorHandler
         ctx.resp.noDefaultContentType = noDefaultContentType
         ctx.resp.noDefaultDate = noDefaultDate
 

@@ -90,9 +90,18 @@ cjpm **默认不开 `-O2`** —— 不写这条，性能设计全部作废。
 - **TLS**：需要 `stdx.net.tls`（OpenSSL 3），由 LB 或独立扩展承担。
 - **WebSocket / gzip / 摘要**：在独立的扩展包里，主模块零 stdx。
 
-## 状态
+## 状态（按设计文档的阶段）
 
-**P0–P2 原型已可运行**（见 `docs/design.md` 的分阶段计划）：
+| 阶段 | 内容 | 状态 |
+|---|---|---|
+| P0 | `Bytes` / `Buffers` / 扫描原语 / `-O2` 工程骨架 | ✅ |
+| P1 | `HeaderTable` + `RequestParser` | ✅（验收标准里的「每请求 0 分配」不可达，见下节） |
+| P2 | `ResponseSerializer` + perConnLoop（keep-alive / 超时） | ✅ 56–59 万 QPS（验收 ≥ 40 万） |
+| P3 | body（定长 + chunked）/ `ArgsView` / URI 规范化 / Cookie | ✅ 含 CL/TE 走私、`%2e%2e` 等安全用例 |
+| P4 | `ObjectPool` / `reduceMemoryUsage` / `maxConnsPerIP` / 优雅关闭 | ✅ 56–59 万 QPS（验收 ≥ 55 万） |
+| P5 | 静态文件 / 错误页 / 中间件 | ✅ |
+
+### 细项
 
 - [x] `Bytes` 零拷贝视图
 - [x] 固定大小读写缓冲
@@ -103,23 +112,21 @@ cjpm **默认不开 `-O2`** —— 不写这条，性能设计全部作废。
 - [x] `Response` 序列化（fasthttp 顺序）
 - [x] `DateCache`
 - [x] `Server` 主循环（keep-alive / 超时 / 优雅关闭）
-- [x] chunked transfer-encoding（P3）
-- [x] Cookie（请求解析 + Set-Cookie 序列化）（P3）
-- [x] P0–P2 单元测试
-- [x] 对象池（per-slot 无锁 + 全局兜底）（P4）
-- [x] 每请求分配降到 **192 B**（从 1016 B 优化而来；fasthttp 是 0）
-- [x] **每请求分配约 48 B**（自身开销；全流程 160 B/req，其中裸 std socket 已占约 112 B）
+- [x] chunked transfer-encoding
+- [x] Cookie（请求解析 + Set-Cookie 序列化）
+- [x] 对象池（per-slot 无锁 + 全局兜底）
+- [x] 每请求分配约 **48 B**（自身开销；全流程 160 B/req，其中裸 std socket 已占约 112 B）
 - [ ] ~~每请求 0 分配~~ —— **在现有 std 上不可达**，见下节「分配实测」
-- [x] 静态文件（P5）：目录索引 / Range / If-Modified-Since / 路径穿越防护
+- [x] 静态文件：目录索引 / Range / If-Modified-Since / 路径穿越防护
+- [x] 错误页：`Server.errorHandler`（fasthttp `ErrorHandler` 的等价物，返回 true 表示已自行写出）
 - [x] 并发上限（Semaphore + 503）
 - [x] 全部 Server 配置项生效（getOnly / maxConnsPerIP / readBufferSize / writeTimeout / ...）
 - [x] 中间件：access log / recovery / requestID / CORS / bodyLimit（Server.use）
 - [x] Hijack（ctx.hijack，把连接交给使用者 —— 第三方实现 WS / CONNECT 的途径）
 - [x] SetBodyStream 流式响应（定长 / chunked）
 - [x] MultipartForm（multipart/form-data 解析，含文件字段）
-- [x] **61 个单元测试**
-- [x] 脱离连接的上下文（`DetachedRequest` / `newDetachedCtx` / `snapshotResponse`）——
-      让 handler 链能在不起 socket 的场景复用（测试、上层框架适配）
+- [x] 脱离连接的上下文（`DetachedRequest` / `newDetachedCtx` / `snapshotResponse`）
+- [x] **63 个单元测试**
 
 ## 分配实测（2026-11-08）
 

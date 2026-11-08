@@ -910,6 +910,11 @@ close = 请求头含 Connection: close
 |---|---|---|
 | P0 | Bytes + Buffers + 扫描原语 + -O2 工程骨架 | 微基准复现 §8.4 的数字 |
 | P1 | HeaderTable + RequestParser（只 header） | httptest 风格用例；每请求 0 分配 |
+
+> **2026-11-08 注记**：上表 P1/P4 里的「每请求 0 分配」**在现有 std 上不可达** ——
+> 裸 `std.net.TcpSocket` 的 read/write 自身就约 112 B/req（同口径实测），
+> tachyon 全流程 160 B/req，其中自身 HTTP 层约 48 B。详见仓库根 README 的「分配实测」一节。
+> （本文其余内容保持调研当时原样，不回改。）
 | P2 | ResponseSerializer + perConnLoop（keep-alive + 超时） | curl 全场景通过；QPS >= 40 万 |
 | P3 | body（定长 + chunked）+ ArgsView + URI 规范化 + Cookie | RFC 用例 + 安全用例（CL/TE 走私、%2e%2e） |
 | P4 | ObjectPool + reduceMemoryUsage + maxConnsPerIP + graceful shutdown | QPS >= 55 万；空闲连接内存回落 |
