@@ -108,7 +108,8 @@ cjpm **默认不开 `-O2`** —— 不写这条，性能设计全部作废。
 - [x] P0–P2 单元测试
 - [x] 对象池（per-slot 无锁 + 全局兜底）（P4）
 - [x] 每请求分配降到 **192 B**（从 1016 B 优化而来；fasthttp 是 0）
-- [ ] 每请求 0 分配（还差 192 B，主要是 read/write 的切片参数）
+- [x] **每请求分配约 48 B**（自身开销；全流程 160 B/req，其中裸 std socket 已占约 112 B）
+- [ ] ~~每请求 0 分配~~ —— **在现有 std 上不可达**，见下节「分配实测」
 - [x] 静态文件（P5）：目录索引 / Range / If-Modified-Since / 路径穿越防护
 - [x] 并发上限（Semaphore + 503）
 - [x] 全部 Server 配置项生效（getOnly / maxConnsPerIP / readBufferSize / writeTimeout / ...）
@@ -119,6 +120,30 @@ cjpm **默认不开 `-O2`** —— 不写这条，性能设计全部作废。
 - [x] **61 个单元测试**
 - [x] 脱离连接的上下文（`DetachedRequest` / `newDetachedCtx` / `snapshotResponse`）——
       让 handler 链能在不起 socket 的场景复用（测试、上层框架适配）
+
+## 分配实测（2026-11-08）
+
+口径与 `bench/` 里的 alloc bench 一致：32 连接 × 200 请求，`getAllocatedHeapSize` 差值 / 请求数，
+**客户端与服务端合计**。
+
+| 被测 | 每请求分配 |
+|---|---:|
+| 裸 `std.net.TcpSocket`（accept → read → write 固定响应） | **112 B** |
+| tachyon 全流程（HTTP 解析 + 响应序列化 + socket 读写） | **160 B** |
+
+→ tachyon 自身的 HTTP 层开销约 **48 B/req**；剩下 112 B 来自 std 的 socket IO。
+
+复现：`cd bench/std-alloc-baseline && cjpm run`（裸 socket 基线）；
+tachyon 侧：`cd bench && cjpm run`（按 handler 粒度拆分的 alloc bench）。
+
+**为什么「0 分配」做不到**：`TcpSocket` 只有 `read(Array<Byte>)` / `write(Array<Byte>)`，
+没有 `(buf, offset, count)` 重载、没有 `writev`、也没有接受 `Bytes` 视图的版本。
+响应长度不固定，必须传一个「长度恰好等于报文」的数组；socket 内部实现本身也在分配。
+（对照：Go 的 fasthttp 靠 `net.Buffers` + `writev` 才能做到写侧零分配。）
+
+**勘误**：早先这里写的是「还差 192 B，主要是 read/write 的切片参数」——**这个归因是错的**。
+实测 `Array<Byte>` 切片**不分配**：`a[0..4096]`、`a[0..80]` 与完全不切片的循环，
+每轮分配量相同（都是 16 B 的循环基线）。所以那块开销不在切片上。
 
 ## License
 

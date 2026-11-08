@@ -1,0 +1,8 @@
+[package]
+  cjc-version = "1.2.0"
+  name = "std_alloc_baseline"
+  version = "0.1.0"
+  description = "裸 std TcpSocket 的每请求分配基线（用于归因 tachyon 自身开销）"
+  output-type = "executable"
+  src-dir = "src"
+  compile-option = "-O2 -Woff unused"
