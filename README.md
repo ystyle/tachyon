@@ -95,10 +95,10 @@ cjpm **默认不开 `-O2`** —— 不写这条，性能设计全部作废。
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | P0 | `Bytes` / `Buffers` / 扫描原语 / `-O2` 工程骨架 | ✅ |
-| P1 | `HeaderTable` + `RequestParser` | ✅（验收标准里的「每请求 0 分配」不可达，见下节） |
-| P2 | `ResponseSerializer` + perConnLoop（keep-alive / 超时） | ✅ 56–59 万 QPS（验收 ≥ 40 万） |
+| P1 | `HeaderTable` + `RequestParser` | ✅ 自身零分配 |
+| P2 | `ResponseSerializer` + perConnLoop（keep-alive / 超时） | ✅ 自身零分配，QPS 见上节「性能」 |
 | P3 | body（定长 + chunked）/ `ArgsView` / URI 规范化 / Cookie | ✅ 含 CL/TE 走私、`%2e%2e` 等安全用例 |
-| P4 | `ObjectPool` / `reduceMemoryUsage` / `maxConnsPerIP` / 优雅关闭 | ✅ 56–59 万 QPS（验收 ≥ 55 万） |
+| P4 | `ObjectPool` / `reduceMemoryUsage` / `maxConnsPerIP` / 优雅关闭 | ✅ CPU/请求 11.8–11.9 µs（零分配改造后） |
 | P5 | 静态文件 / 错误页 / 中间件 | ✅ |
 
 ### 细项
@@ -115,7 +115,7 @@ cjpm **默认不开 `-O2`** —— 不写这条，性能设计全部作废。
 - [x] chunked transfer-encoding
 - [x] Cookie（请求解析 + Set-Cookie 序列化）
 - [x] 对象池（per-slot 无锁 + 全局兜底）
-- [x] 每请求分配约 **48 B**（自身开销；全流程 160 B/req，其中裸 std socket 已占约 112 B）
+- [x] **tachyon 自身零分配**：全流程 112 B/req，全部来自 std socket（2 次调用 × 56 B）
 - [ ] ~~每请求 0 分配~~ —— **在现有 std 上不可达**，见下节「分配实测」
 - [x] 静态文件：目录索引 / Range / If-Modified-Since / 路径穿越防护
 - [x] 错误页：`Server.errorHandler`（fasthttp `ErrorHandler` 的等价物，返回 true 表示已自行写出）
@@ -148,18 +148,25 @@ cjpm **默认不开 `-O2`** —— 不写这条，性能设计全部作废。
 | 被测 | 每请求分配 |
 |---|---:|
 | 裸 `std.net.TcpSocket`（accept → read → write 固定响应） | **112 B** |
-| tachyon 全流程（HTTP 解析 + 响应序列化 + socket 读写） | **160 B** |
+| tachyon 全流程（HTTP 解析 + 响应序列化 + socket 读写） | **112 B** |
 
-→ tachyon 自身的 HTTP 层开销约 **48 B/req**，其余是 socket 的固定成本。
+→ **tachyon 自身的 HTTP 层是 0 B/req**：整条链的分配量等于「1 读 + 1 写」两次 socket 调用的固定成本。
 
-### 结论：为什么「0 分配」做不到
+### 结论：那 112 B 是 std 的闭包
 
 1. **分配在 socket 里，而且是常数**：`read`/`write` 每次调用固定约 56 B，**与载荷大小无关**
-   （80 B 与 1024 B 一样），不像"按数据量复制"，更像每次调用建了个临时对象。
-2. **不是 API 形状问题**：`Array<Byte>` 的切片（`a[i..j]`）是零拷贝视图，**切片传入与整数组传入
-   分配量完全相同**（都是 56 B/call，对照的空循环是 0）。所以「没有 offset/count 重载」并不构成障碍。
-3. 因此 tachyon 的硬下限是「每请求 1 读 + 1 写」的固定成本；要再往下，只能靠 std 把
-   `TcpSocket.read/write` 的内部分配去掉。
+   （80 B 与 1024 B 一样）。
+2. **根因（已读 std 源码确认）**：`std/net/socket_impl_common.cj` 的
+   `SocketImpl.write` 是
+   `holder.write<Unit> { socket, state => ... }` —— 传进去的闭包捕获了 `payload`/`writeTimeout_`，
+   **每次调用都要在堆上建一个闭包对象**（`read` 同理）。所以是常数 56 B，且与数据量无关。
+3. **不是 API 形状问题**：`Array<Byte>` 切片（`a[i..j]`）是零拷贝视图，切片传入与整数组传入
+   分配量完全相同。加 offset/count 重载并不能解决这件事。
+4. 因此下限是「每请求 1 读 + 1 写」的固定成本；要再往下只能靠 std 把闭包去掉。
+
+我们这边已把 HTTP 层压到 0：原先每请求有两次 `Bytes("GET"/"HEAD".toArray())`（各 24 B），
+改成包级预置的 `Bytes` 常量后归零（**注意别改成"逐字节和 String 比"**：那样虽然也不分配，
+但 String 下标比数组下标慢，实测 QPS 掉 7%）。
 
 已向上游提交：[Cangjie/UsersForum#3578](https://atomgit.com/Cangjie/UsersForum/issues/3578)。
 （对照：Go 的 `net.Conn.Write` 零分配，fasthttp 才能在 128 长连接上做到 745,900 QPS。）

@@ -1,5 +1,21 @@
 package ystyle::tachyon
 
+/// 预置的常用字面量字节视图（包级初始化一次）
+///
+/// 热路径上不要再写 `Bytes("GET".toArray())` —— `toArray()` 每次调用都分配一个数组
+/// （实测 24 B/次，一个请求两次就 48 B）。这里预置成常量后比较零分配，
+/// 且比"逐字节和 String 比"更快（String 下标有额外间接）。
+let bytesGET: Bytes = Bytes("GET".toArray())
+let bytesHEAD: Bytes = Bytes("HEAD".toArray())
+let bytesPOST: Bytes = Bytes("POST".toArray())
+let bytesPUT: Bytes = Bytes("PUT".toArray())
+let bytesDELETE: Bytes = Bytes("DELETE".toArray())
+let bytesOPTIONS: Bytes = Bytes("OPTIONS".toArray())
+let bytesKeepAlive: Bytes = Bytes("keep-alive".toArray())
+let bytesFormContentType: Bytes = Bytes("application/x-www-form-urlencoded".toArray())
+let bytesClose: Bytes = Bytes("close".toArray())
+let bytesChunked: Bytes = Bytes("chunked".toArray())
+
 /**
  * 请求解析：一次扫描完成"找行尾 / 找冒号 / 校验 key / 记录 key 有无内部空格"，
  * 不做"先 indexOf(换行) 再 indexOf(冒号)"的两遍扫描。
@@ -132,7 +148,7 @@ class Request {
                     handled = true
                 } else if (keyView.equalsAsciiIgnoreCase(Bytes(hdrConnection))) {
                     header.connection = header.copyIn(buf, vs, ve)
-                    if (containsToken(valView, "close")) { connectionClose = true }
+                    if (containsToken(valView, bytesClose)) { connectionClose = true }
                     handled = true
                 } else if (keyView.equalsAsciiIgnoreCase(Bytes(hdrCookie))) {
                     header.cookie = header.copyIn(buf, vs, ve)
@@ -141,7 +157,7 @@ class Request {
             } else if (lower0 == 116) {
                 if (keyView.equalsAsciiIgnoreCase(Bytes(hdrTransferEncoding))) {
                     header.transferEncoding = header.copyIn(buf, vs, ve)
-                    if (containsToken(valView, "chunked")) { contentLength = -1 }
+                    if (containsToken(valView, bytesChunked)) { contentLength = -1 }
                     handled = true
                 }
             } else if (lower0 == 117) {
@@ -180,13 +196,13 @@ class Request {
             return false
         }
         if (!isHTTP11) {
-            if (!containsToken(header.connection, "keep-alive")) {
+            if (!containsToken(header.connection, bytesKeepAlive)) {
                 connectionClose = true
             }
         }
 
-        isHead = method.equals(Bytes("HEAD".toArray()))
-        isGet = method.equals(Bytes("GET".toArray()))
+        isHead = method.equals(bytesHEAD)
+        isGet = method.equals(bytesGET)
         return true
     }
 }
@@ -218,8 +234,8 @@ func parseContentLength(buf: Array<Byte>, from: Int64, to: Int64): Int64 {
 }
 
 /** 逗号分隔 token 列表是否含某个 token（大小写无关） */
-func containsToken(v: Bytes, token: String): Bool {
-    let t = token.toArray()
+func containsToken(v: Bytes, token: Bytes): Bool {
+    let t = token.toArrayUnsafe()
     let n = v.size()
     var i: Int64 = 0
     while (i < n) {

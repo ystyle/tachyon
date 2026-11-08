@@ -175,6 +175,21 @@ public struct Bytes {
     }
 
     /** 是否以 prefix 开头 */
+    /** 前缀比较（对方是 Bytes 视图）：零分配 */
+    public func startsWith(prefix: Bytes): Bool {
+        if (prefix.len > len) {
+            return false
+        }
+        var i: Int64 = 0
+        while (i < prefix.len) {
+            if (buf[start + i] != prefix.buf[prefix.start + i]) {
+                return false
+            }
+            i += 1
+        }
+        return true
+    }
+
     public func startsWith(prefix: Array<Byte>): Bool {
         if (prefix.size > len) {
             return false

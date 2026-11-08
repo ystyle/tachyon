@@ -71,8 +71,8 @@ public class RequestCtx {
     /** 仅供测试：设置方法 */
     public func setMethodInternal(m: String): Unit {
         req.method = Bytes(m.toArray())
-        req.isGet = req.method.equals(Bytes("GET".toArray()))
-        req.isHead = req.method.equals(Bytes("HEAD".toArray()))
+        req.isGet = req.method.equals(bytesGET)
+        req.isHead = req.method.equals(bytesHEAD)
     }
 
     // ---- 请求侧（只读视图）----
@@ -93,7 +93,7 @@ public class RequestCtx {
             let ct = req.header.contentType
             if (!ct.isEmpty()) {
                 // 前缀比对单独算：&& 右侧带分配（toArray）会被 lint 判为副作用
-                let isFormCt = ct.startsWith("application/x-www-form-urlencoded".toArray())
+                let isFormCt = ct.startsWith(bytesFormContentType)
                 if (isFormCt) {
                     postArgsView.parse(req.body)
                 }
@@ -153,10 +153,10 @@ public class RequestCtx {
 
     public func isGet(): Bool { return req.isGet }
     public func isHead(): Bool { return req.isHead }
-    public func isPost(): Bool { return req.method.equals(Bytes("POST".toArray())) }
-    public func isPut(): Bool { return req.method.equals(Bytes("PUT".toArray())) }
-    public func isDelete(): Bool { return req.method.equals(Bytes("DELETE".toArray())) }
-    public func isOptions(): Bool { return req.method.equals(Bytes("OPTIONS".toArray())) }
+    public func isPost(): Bool { return req.method.equals(bytesPOST) }
+    public func isPut(): Bool { return req.method.equals(bytesPUT) }
+    public func isDelete(): Bool { return req.method.equals(bytesDELETE) }
+    public func isOptions(): Bool { return req.method.equals(bytesOPTIONS) }
 
     // ---- 响应侧 ----
     public func setStatusCode(code: UInt16): Unit {
