@@ -199,6 +199,11 @@ public class RequestCtx {
     }
 
     public func setHeader(name: String, value: String): Unit {
+        // 特殊头要落到专用字段，否则序列化时会既写专用字段又写普通表 → 重复头
+        if (Bytes(name.toArray()).equalsAsciiIgnoreCase(Bytes("Content-Type".toArray()))) {
+            resp.setContentType(value)
+            return
+        }
         // 支持覆盖：先找同名，找到就替换
         let nb = Bytes(name.toArray())
         var i: Int64 = 0
