@@ -417,6 +417,10 @@ do {
 > —— `[BUG] runtime：SockRecvNonBlockGeneral 在不再自旋时仍执行 sched_yield()，高并发 HTTP 服务端约 17% 的每请求 CPU 空转`
 > （本地草稿：[`upstream-issue-recv-spin.md`](upstream-issue-recv-spin.md)、投稿版 `forum-issue-recv-spin.md`）。
 >
+> 另附**最小复现工程**（纯 Cangjie，自带压测客户端，不依赖 stdx）：
+> [repro/](https://github.com/ystyle/cangjie-runtime-issue-3577-repro/tree/main/repro)，
+> 一条命令 `./run-repro.sh 128 20 499` 走完 编译→起服务→采样→施压→打印热点。
+>
 > 附件（采样原始数据 / 火焰图 / 脚本 / 探针）另存公开仓：
 > [github.com/ystyle/cangjie-runtime-issue-3577-repro](https://github.com/ystyle/cangjie-runtime-issue-3577-repro)
 > （AtomGit 镜像同名仓），已在 issue 下留言引用。
