@@ -299,6 +299,76 @@ p99 还更低（811 µs vs 1.56 ms）。同步采的 10 s 内服务端 CPU：
   两者跑在同一个仓颉运行时上，**更像运行时的 M:N 调度器在大量阻塞于 socket 的协程下的表现**，
   而不是 tachyon 自己的逻辑问题——但这一点**没有做 profile 验证，属于推断**。
 
+## 4.9 cjprof 实测：CPU 到底花在哪
+
+前面关于"框架上限还是 CPU 上限"只能靠间接推理。这次直接用 **cjprof** 采样，
+两台服务跑同样的负载（256 连接、Windows 侧压 16 s，采样 10 s）。
+
+环境：cjprof 需要 perf_event 权限，宿主机 sudo 不可用（no-new-privileges），
+所以整套塞进 **privileged 容器**（`--privileged --security-opt seccomp=unconfined --network host`），
+把仓颉 SDK 只读挂进去跑。
+
+### tachyon（373,410 req/s）
+
+| 采样位置 | Children | Self |
+|---|---:|---:|
+| `Server::perConnLoop` | 87.0% | 2.7% |
+| └ `BufferedReader::fill` → `TcpSocket::read` | **60.4%** | 0.2% |
+| 　└ `CJ_MRT_SockRecvNonBlock` | 43.3% | 1.1% |
+| 　　└ **[libc] sem_wait** | — | **27.2%** |
+| 　　└ **[libc] sched_yield** | — | **16.7%** |
+| 　　└ `__recv`（真正收数据） | — | 2.4% |
+| └ `BufferedWriter::flush` → `TcpSocket::write` | 11.1% | 0.3% |
+| `Request::parseHeaders` | 5.5% | 3.4% |
+| `RequestCtx::reset` + `HeaderTable::reset` | 5.8% | 2.7% |
+| `Response::serialize` | 1.9% | 1.6% |
+
+**读出来三件事：**
+
+1. **tachyon 自己的代码只占约 10%**（parseHeaders 3.4 + reset 2.7 + serialize 1.6 + 循环 2.7）。
+   瓶颈不在我们的解析/序列化逻辑。
+2. **46% 的 CPU 花在等 socket 上**：`sem_wait` 27.2% + `sched_yield` 16.7% + `__recv` 2.4%。
+   仓颉运行时的 `DopraTcpSocketImpl::readImpl` 是「非阻塞 recv + 信号量 + sched_yield 让出」的组合，
+   **不是高效的阻塞等待**。这部分纯属空转。
+3. **写只有 11%**，说明响应路径（我们的 serialize → 一次 write）已经很便宜。
+
+### stdx.net.http（144,013 req/s，同样负载）
+
+| 采样位置 | Children | Self |
+|---|---:|---:|
+| `HttpServer1::process` | 91.7% | 1.4% |
+| └ `readRequest` | 44.0% | 0.8% |
+| 　└ `readRequestLine` | **27.5%** | — |
+| 　　└ `BufferedConn::readLine` | 23.0% | — |
+| └ `consumeRequestAndWriteResponse` | 40.0% | 0.1% |
+| 　└ `writeResponse` | 28.7% | 0.6% |
+| 　　└ `checkResponseHeader` | 12.8% | 0.6% |
+| `httpLog`（**日志**，连 DEBUG 都没开） | **12.6%** | 0.6% |
+| `HashMap<Str, HeaderValue>::get/add` | 4.1% | 3.9% |
+| socket 读等待 | 15.2% | — |
+
+对比很直接：
+
+- tachyon：**60% 在等 I/O，10% 在干自己的活** —— I/O 等待型。
+- stdx：**只有 15% 在等 I/O，但 27.5% 花在读请求行、28.7% 花在写响应、12.6% 花在日志** ——
+  自己算得太多，CPU 型。这就是它每请求 2 倍 CPU 的来源。
+
+### 所以 §4.8 的"框架上限"到底是什么
+
+profile 给出了确定答案，且**推翻了"是 tachyon 逻辑问题"和"是锁"这两个猜测**：
+
+> **44–46% 的 CPU 时间耗在仓颉运行时的 socket 等待实现（sem_wait + sched_yield）上。**
+> 它不是我们的锁（datecache 的 Mutex 已移除，profile 里已无该符号），
+> 也不是我们的解析（只占 3.4%）。
+
+这也解释了两个反直觉现象：
+- **加核/加线程没用**：sched_yield 空转越多，核间争用越重（`cjProcessorNum=32` 时反而降到 326K）。
+- **加连接更差**：更多协程同时在 sem_wait/sched_yield 上空转，每请求 CPU 从 13.2 µs 涨到 20.1 µs。
+
+> profile 数据：`.scratch/logs/{tachyon-prof2,stdx-prof}.data`
+> 火焰图：`.scratch/logs/flame-{tachyon,stdx}.svg`
+> 复现脚本：`.scratch/logs/prof-tachyon.sh`、`prof-both.sh`
+
 ## 5. 这次对比没有证明什么（别过度解读）
 
 写清楚边界，比多给几个数字有用：
