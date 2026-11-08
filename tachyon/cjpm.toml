@@ -2,7 +2,7 @@
   cjc-version = "1.2.0"
   name = "tachyon"
   organization = "ystyle"
-  version = "0.1.0"
+  version = "0.2.0"
   description = "A fasthttp-style zero-allocation HTTP/1.1 server for Cangjie (std-only)"
   output-type = "static"
   src-dir = "src"
