@@ -1,18 +1,18 @@
 # tachyon 设计文档
 
 完整设计（含 fasthttp 源码剖析、仓颉标准库能力实测、HTTP/2 可行性分析、扩展成员规划）
-在工作区文档仓：
+在本仓：
 
-**[`docs/plans/2026-11-07-fasthttp-cj-server.md`](../../docs/plans/2026-11-07-fasthttp-cj-server.md)**
+**[`plans/2026-11-07-fasthttp-cj-server.md`](plans/2026-11-07-fasthttp-cj-server.md)**
 
 支撑材料：
 
 | 文件 | 内容 |
 |---|---|
-| `../../.scratch/notes/fasthttp-analysis.md` | fasthttp 服务端剖析（1565 行 / 423 处 file:line） |
-| `../../.scratch/notes/cangjie-std-capability.md` | 仓颉标准库能力实测（828 行 / 27 个探针） |
-| `../../.scratch/notes/stdx-capability.md` | stdx 能力与依赖方式实测（434 行） |
-| `../../.scratch/notes/go-baseline.md` | Go 基线压测 |
+| `notes/fasthttp-analysis.md` | fasthttp 服务端剖析（1565 行 / 423 处 file:line） |
+| `notes/cangjie-std-capability.md` | 仓颉标准库能力实测（828 行 / 27 个探针） |
+| `notes/stdx-capability.md` | stdx 能力与依赖方式实测（434 行） |
+| `notes/go-baseline.md` | Go 基线压测 |
 
 ## 本仓已知的取舍
 
