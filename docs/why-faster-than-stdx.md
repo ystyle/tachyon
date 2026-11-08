@@ -369,6 +369,49 @@ profile 给出了确定答案，且**推翻了"是 tachyon 逻辑问题"和"是�
 > 火焰图：`.scratch/logs/flame-{tachyon,stdx}.svg`
 > 复现脚本：`.scratch/logs/prof-tachyon.sh`、`prof-both.sh`
 
+## 4.10 对着 runtime 源码看：那 16.7% 的 `sched_yield` 从哪来
+
+把 `cangjie_runtime` 拉下来（`atomgit.com/Cangjie/cangjie_runtime`，@ `e927f24`）对照 profile，
+定位到 `runtime/src/CJThread/src/aio/sock/src/sock.cpp:1634` 的 `SockRecvNonBlockGeneral`：
+
+```cpp
+unsigned int freeThreshold = schdProcessor->processorNum / PROCESSOR_FREE_RATIO;   // /2
+
+do {
+    recvRet = recv(fd, buf, len, flags);
+    if (recvRet != -1) break;
+    cycles++;
+    // 空闲处理器足够时自旋几次，减少 cjthread park
+    scheduleFree = (schdProcessor->freeNum).load(relaxed) > freeThreshold &&
+                    cycles <= RECV_MAX_CYCLES;      // = 15
+    (void)sched_yield();                            // ← 无条件执行
+} while (ret == EINTR || ret == 0 || (ret == EAGAIN && scheduleFree));
+```
+
+**两处浪费：**
+
+1. **`sched_yield()` 无条件调用**。当 `scheduleFree == false`（空闲处理器不够，或已超 15 轮）时，
+   循环本来就要退出、上层马上 park 这个 cjthread —— 这次 yield 纯属多余的系统调用。
+   按 37 万 req/s、每请求至少一次 EAGAIN，相当于 **~2 µs/请求**，与 profile 的 16.7% 吻合
+   （每请求总 CPU 13.2 µs）。
+2. **超配时自旋判据失效**。`freeNum > processorNum/2` 在 `cjProcessorNum` 大于物理核数时
+   恒成立（总有一半 processor 空闲）→ 每次读自旋满 15 轮，每轮 recv + sched_yield = 最多 30 次系统调用。
+
+这与之前的实测完全对上：
+
+| cjProcessorNum | QPS | 进程核数 | 解释 |
+|---|---:|---:|---|
+| 默认（=8） | 358,726 | 4.92 | 正常 |
+| 8 | 355,518 | 4.32 | 正常 |
+| 16 | 354,666 | 4.94 | 正常 |
+| **32** | **326,480** | **7.99** | **超配 → 自旋条件恒真 → 空转** |
+
+**这也进一步确认：§4.8/§4.9 里的"框架上限"不是 tachyon 的代码问题**，
+而是 runtime 的 I/O 等待路径（无条件 yield + 可失效的自旋判据）。
+
+> 完整的复现材料与修改建议整理成了 issue 草稿：[`upstream-issue-recv-spin.md`](upstream-issue-recv-spin.md)。
+> runtime 源码：`.scratch/ref/cangjie_runtime`（浅克隆，只读对照，未改动上游）。
+
 ## 5. 这次对比没有证明什么（别过度解读）
 
 写清楚边界，比多给几个数字有用：
