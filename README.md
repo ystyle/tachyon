@@ -130,27 +130,44 @@ cjpm **默认不开 `-O2`** —— 不写这条，性能设计全部作废。
 
 ## 分配实测（2026-11-08）
 
-口径与 `bench/` 里的 alloc bench 一致：32 连接 × 200 请求，`getAllocatedHeapSize` 差值 / 请求数，
-**客户端与服务端合计**。
+两个口径，都出自 `bench/std-alloc-baseline`（`getAllocatedHeapSize` 差值 / 次数）：
+
+### 逐调用（单看 socket 的 read / write）
+
+| 操作 | 每次分配 |
+|---|---:|
+| 空循环（对照） | 0 B |
+| 普通函数调用（对照） | 0 B |
+| `write(1024 B)` | **56 B** |
+| `write(80 B)` | **56 B** |
+| `write(wide[0..1024])`（切片传入） | **56 B** |
+| `read(4096 B)` | **56 B** |
+
+### 端到端
 
 | 被测 | 每请求分配 |
 |---|---:|
 | 裸 `std.net.TcpSocket`（accept → read → write 固定响应） | **112 B** |
 | tachyon 全流程（HTTP 解析 + 响应序列化 + socket 读写） | **160 B** |
 
-→ tachyon 自身的 HTTP 层开销约 **48 B/req**；剩下 112 B 来自 std 的 socket IO。
+→ tachyon 自身的 HTTP 层开销约 **48 B/req**，其余是 socket 的固定成本。
 
-复现：`cd bench/std-alloc-baseline && cjpm run`（裸 socket 基线）；
-tachyon 侧：`cd bench && cjpm run`（按 handler 粒度拆分的 alloc bench）。
+### 结论：为什么「0 分配」做不到
 
-**为什么「0 分配」做不到**：`TcpSocket` 只有 `read(Array<Byte>)` / `write(Array<Byte>)`，
-没有 `(buf, offset, count)` 重载、没有 `writev`、也没有接受 `Bytes` 视图的版本。
-响应长度不固定，必须传一个「长度恰好等于报文」的数组；socket 内部实现本身也在分配。
-（对照：Go 的 fasthttp 靠 `net.Buffers` + `writev` 才能做到写侧零分配。）
+1. **分配在 socket 里，而且是常数**：`read`/`write` 每次调用固定约 56 B，**与载荷大小无关**
+   （80 B 与 1024 B 一样），不像"按数据量复制"，更像每次调用建了个临时对象。
+2. **不是 API 形状问题**：`Array<Byte>` 的切片（`a[i..j]`）是零拷贝视图，**切片传入与整数组传入
+   分配量完全相同**（都是 56 B/call，对照的空循环是 0）。所以「没有 offset/count 重载」并不构成障碍。
+3. 因此 tachyon 的硬下限是「每请求 1 读 + 1 写」的固定成本；要再往下，只能靠 std 把
+   `TcpSocket.read/write` 的内部分配去掉。
 
-**勘误**：早先这里写的是「还差 192 B，主要是 read/write 的切片参数」——**这个归因是错的**。
-实测 `Array<Byte>` 切片**不分配**：`a[0..4096]`、`a[0..80]` 与完全不切片的循环，
-每轮分配量相同（都是 16 B 的循环基线）。所以那块开销不在切片上。
+已向上游提交：[Cangjie/UsersForum#3578](https://atomgit.com/Cangjie/UsersForum/issues/3578)。
+（对照：Go 的 `net.Conn.Write` 零分配，fasthttp 才能在 128 长连接上做到 745,900 QPS。）
+
+### 复现
+
+`cd bench/std-alloc-baseline && cjpm run` —— 逐调用归因 + 端到端两个口径一次跑完；
+tachyon 侧按 handler 粒度拆分用 `cd bench && cjpm run`。
 
 ## License
 
