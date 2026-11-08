@@ -27,6 +27,8 @@ class HeaderTable {
     var cookie: Bytes = Bytes.empty()
     var expect: Bytes = Bytes.empty()
     var contentLengthBytes: Bytes = Bytes.empty()
+    // 显式设置的 Content-Type 用 String 存（避免每请求 toArray 分配）
+    var contentTypeStr: String = ""
 
     init(capacity: Int64) {
         this.hdrBuf = Array<Byte>(capacity, repeat: 0)
@@ -44,6 +46,7 @@ class HeaderTable {
         cookie = Bytes.empty()
         expect = Bytes.empty()
         contentLengthBytes = Bytes.empty()
+        contentTypeStr = ""
     }
 
     /**

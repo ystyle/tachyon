@@ -85,7 +85,9 @@ class Response {
     }
 
     func setContentType(ct: String): Unit {
-        header.contentType = Bytes(ct.toArray())
+        // 存 String 而不是 Bytes(ct.toArray())：每请求省一次 Array 分配
+        header.contentTypeStr = ct
+        header.contentType = Bytes.empty()
     }
 
     /** 序列化到写缓冲。返回实际写入的字节数，-1 表示缓冲装不下 */
@@ -126,10 +128,13 @@ class Response {
         let bodyLen: Int64 = if (skipBodyHere) { 0 } else { bodyLength() }
 
         // 4. Content-Type（仅当有 body 或显式设置）
-        let ct = header.contentType
-        if (!ct.isEmpty()) {
+        if (header.contentTypeStr.size > 0) {
             p = appendString(dst, p, "Content-Type: ")
-            p = appendBytes(dst, p, ct)
+            p = appendString(dst, p, header.contentTypeStr)
+            p = appendCRLF(dst, p)
+        } else if (!header.contentType.isEmpty()) {
+            p = appendString(dst, p, "Content-Type: ")
+            p = appendBytes(dst, p, header.contentType)
             p = appendCRLF(dst, p)
         } else if (!noDefaultContentType && bodyLen != 0) {
             p = appendString(dst, p, "Content-Type: text/plain; charset=utf-8\r\n")

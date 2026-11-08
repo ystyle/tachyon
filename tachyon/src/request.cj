@@ -169,8 +169,11 @@ class Request {
         if (contentLength < 0) {
             header.contentLengthBytes = Bytes.empty()
         }
+        // RFC 9112 §6.1：同时收到 Content-Length 与 Transfer-Encoding 的请求**必须** 400 拒绝
+        // （只关闭连接而不拒绝会让前置代理按 CL、我们按 TE 解析，形成走私面）
         if (contentLengthSeen && !header.transferEncoding.isEmpty()) {
             connectionClose = true
+            return false
         }
         if (isHTTP11 && !hostSeen) {
             connectionClose = true
