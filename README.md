@@ -105,7 +105,7 @@ cjpm **默认不开 `-O2`** —— 不写这条，性能设计全部作废。
 - [x] `Server` 主循环（keep-alive / 超时 / 优雅关闭）
 - [x] chunked transfer-encoding（P3）
 - [x] Cookie（请求解析 + Set-Cookie 序列化）（P3）
-- [x] 27 个单元测试
+- [x] P0–P2 单元测试
 - [x] 对象池（per-slot 无锁 + 全局兜底）（P4）
 - [x] 每请求分配降到 **192 B**（从 1016 B 优化而来；fasthttp 是 0）
 - [ ] 每请求 0 分配（还差 192 B，主要是 read/write 的切片参数）
@@ -116,7 +116,9 @@ cjpm **默认不开 `-O2`** —— 不写这条，性能设计全部作废。
 - [x] Hijack（ctx.hijack，把连接交给使用者 —— 第三方实现 WS / CONNECT 的途径）
 - [x] SetBodyStream 流式响应（定长 / chunked）
 - [x] MultipartForm（multipart/form-data 解析，含文件字段）
-- [x] 55 个单元测试
+- [x] **60 个单元测试**
+- [x] 脱离连接的上下文（`DetachedRequest` / `newDetachedCtx` / `snapshotResponse`）——
+      让 handler 链能在不起 socket 的场景复用（测试、上层框架适配）
 
 ## License
 
