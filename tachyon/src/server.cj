@@ -388,7 +388,7 @@ public class Server {
                 ctx.reset()
                 continue
             }
-            let written = ctx.resp.serialize(writer, name, dateCache.line(), dateCache.lineLen())
+            let written = ctx.resp.serialize(writer, name, dateCache.line())
             if (written < 0) {
                 // 写缓冲装不下：直接 flush 后回 500（极端情况）
                 let err = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
@@ -439,9 +439,9 @@ public class Server {
         p = appendString(dst, p, "Server: ")
         p = appendString(dst, p, name)
         p = appendCRLF(dst, p)
-        let dlen = dateCache.lineLen()
+        let dbuf = dateCache.line()
+        let dlen = dbuf.size
         if (dlen > 0) {
-            let dbuf = dateCache.line()
             var di: Int64 = 0
             while (di < dlen) {
                 dst[p] = dbuf[di]

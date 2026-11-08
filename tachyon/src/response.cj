@@ -91,7 +91,7 @@ class Response {
     }
 
     /** 序列化到写缓冲。返回实际写入的字节数，-1 表示缓冲装不下 */
-    func serialize(w: BufferedWriter, serverName: String, dateBuf: Array<Byte>, dateLen: Int64): Int64 {
+    func serialize(w: BufferedWriter, serverName: String, dateBuf: Array<Byte>): Int64 {
         w.reset()
         let dst = w.buf
         var p: Int64 = 0
@@ -114,7 +114,8 @@ class Response {
             p = appendCRLF(dst, p)
         }
 
-        // 3. Date（缓存行，直接按有效长度 memcpy）
+        // 3. Date（不可变快照，长度就是数组长度，memcpy 即可）
+        let dateLen = dateBuf.size
         if (!noDefaultDate && dateLen > 0) {
             var di: Int64 = 0
             while (di < dateLen) {

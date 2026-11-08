@@ -1,19 +1,31 @@
 package ystyle::tachyon
 
-import std.sync.{AtomicReference, Mutex, AtomicBool}
+import std.sync.{AtomicReference, AtomicBool}
 import std.time.{DateTime, Month, DayOfWeek}
 import std.core.*
 
 /**
- * Date 头的缓存行。
+ * Date 头的缓存行（不可变快照）。
  *
  * 仓颉 DateTime.now() 只要 20 ns，但格式化要 1227 ns（实测），
  * 所以每秒刷一次 + 序列化时 memcpy 仍然值得（约 1.2 us/请求 的收益）。
+ *
+ * ⚠️ 读路径必须**无锁**：早先版本用 Mutex 保护 len，每次请求都要 synchronized，
+ * 在 16 线程上是全局串行点。现在刷新时构造不可变快照、原子换引用，
+ * 读侧只做一次 AtomicReference.load()。
  */
+class DateSnapshot {
+    let bytes: Array<Byte>
+
+    init(b: Array<Byte>) {
+        bytes = b
+    }
+}
+
+let emptyDateSnapshot: DateSnapshot = DateSnapshot(Array<Byte>(0, repeat: 0))
+
 class DateCache {
-    var buf: Array<Byte> = Array<Byte>(64, repeat: 0)
-    var len: Int64 = 0
-    let lock: Mutex = Mutex()
+    var current: AtomicReference<DateSnapshot> = AtomicReference<DateSnapshot>(emptyDateSnapshot)
     var running: AtomicBool = AtomicBool(true)
 
     func start(): Unit {
@@ -31,31 +43,13 @@ class DateCache {
     }
 
     func refresh(): Unit {
-        let line = buildDateLine()
-        synchronized(lock) {
-            if (line.size > buf.size) {
-                buf = Array<Byte>(line.size, repeat: 0)
-            }
-            var i: Int64 = 0
-            while (i < line.size) {
-                buf[i] = line[i]
-                i += 1
-            }
-            len = line.size
-        }
+        // 每秒一次，分配一个新快照完全无所谓；换来读路径彻底无锁
+        current.store(DateSnapshot(buildDateLine()))
     }
 
-    /**
-     * 当前缓存行的**原始缓冲**（固定 64 字节，尾部可能有无意义字节）。
-     * 调用方必须同时用 lineLen() 取有效长度，不能直接整块写出。
-     * 刻意不返回 buf[0..len] 切片：切片的 Array 头是每请求一次分配。
-     */
+    /** 当前缓存行（不可变，长度就是数组长度；含行尾 CRLF） */
     func line(): Array<Byte> {
-        return buf
-    }
-
-    func lineLen(): Int64 {
-        synchronized(lock) { return len }
+        return current.load().bytes
     }
 }
 
