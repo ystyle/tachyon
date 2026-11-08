@@ -116,7 +116,7 @@ cjpm **默认不开 `-O2`** —— 不写这条，性能设计全部作废。
 - [x] Hijack（ctx.hijack，把连接交给使用者 —— 第三方实现 WS / CONNECT 的途径）
 - [x] SetBodyStream 流式响应（定长 / chunked）
 - [x] MultipartForm（multipart/form-data 解析，含文件字段）
-- [x] **60 个单元测试**
+- [x] **61 个单元测试**
 - [x] 脱离连接的上下文（`DetachedRequest` / `newDetachedCtx` / `snapshotResponse`）——
       让 handler 链能在不起 socket 的场景复用（测试、上层框架适配）
 

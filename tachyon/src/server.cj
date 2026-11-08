@@ -1,6 +1,6 @@
 package ystyle::tachyon
 
-import std.net.{TcpServerSocket, TcpSocket}
+import std.net.{TcpServerSocket, TcpSocket, IPSocketAddress}
 import std.sync.{SyncCounter, AtomicBool, AtomicInt64, Mutex, Semaphore}
 import std.collection.{HashMap, ArrayList}
 import std.time.MonoTime
@@ -68,7 +68,13 @@ public class Server {
     }
 
     public func listenAndServe(host: String, port: UInt16): Unit {
-        let srv = TcpServerSocket(bindAt: port)
+        // host 为空或 0.0.0.0 时绑所有地址；否则只绑指定网卡/地址（默认全绑会让
+        // 「只听 127.0.0.1」这类用法静默失效，所以这里必须真正用上 host）
+        let srv = if (host.isEmpty() || host == "0.0.0.0") {
+            TcpServerSocket(bindAt: port)
+        } else {
+            TcpServerSocket(bindAt: IPSocketAddress(host, port))
+        }
         srv.reuseAddress = true
         srv.backlogSize = 4096
         srv.bind()
@@ -219,6 +225,18 @@ public class Server {
         match (ctxPool) {
             case Some(p) => p.put(slot, c)
             case None => ()
+        }
+    }
+
+    /** 实际绑定的本地地址（未启动或已关闭时为 None）。
+     *
+     * 绑定端口 0 时用它取系统分配的端口；测试与日志也用得上。
+     */
+    public func localAddress(): ?IPSocketAddress {
+        match (listener) {
+            case Some(s) =>
+                return s.localAddress as IPSocketAddress
+            case None => None
         }
     }
 

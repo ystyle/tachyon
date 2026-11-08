@@ -83,8 +83,12 @@ public class RequestCtx {
         if (!postArgsParsed) {
             postArgsParsed = true
             let ct = req.header.contentType
-            if (!ct.isEmpty() && ct.startsWith("application/x-www-form-urlencoded".toArray())) {
-                postArgsView.parse(req.body)
+            if (!ct.isEmpty()) {
+                // 前缀比对单独算：&& 右侧带分配（toArray）会被 lint 判为副作用
+                let isFormCt = ct.startsWith("application/x-www-form-urlencoded".toArray())
+                if (isFormCt) {
+                    postArgsView.parse(req.body)
+                }
             }
         }
         return postArgsView
