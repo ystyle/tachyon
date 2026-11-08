@@ -114,6 +114,9 @@ public class RequestCtx {
         }
         return postArgs().get(key)
     }
+    /** 远端地址（无连接信息时返回 None）。对应 fasthttp 的 RemoteAddr()。 */
+    public func remoteAddress(): ?SocketAddress { return remoteAddr }
+
     public func host(): Bytes { return req.header.host }
     public func userAgent(): Bytes { return req.header.userAgent }
     public func body(): Bytes { return req.body }
