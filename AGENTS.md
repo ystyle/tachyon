@@ -28,7 +28,7 @@ fasthttp 风格、零分配的仓颉 HTTP/1.1 服务端。**仅依赖 `std.*`**�
 ```shell
 eval "$(cjvs env zsh)"
 cjpm build -j 8
-cjpm test               # 17 个单元测试
+cjpm test               # 61 个单元测试
 ```
 
 **测试绿了才提交**。新增功能必须配用例。
@@ -50,6 +50,12 @@ tachyon/               主模块（ystyle::tachyon）
     datecache.cj       Date 头缓存
     server.cj          Server 主循环
     ctx.cj             RequestCtx
+    detached.cj        脱离连接的上下文（DetachedRequest / newDetachedCtx / snapshotResponse）
+    fs.cj              静态文件 FileServer（目录索引 / Range / 条件请求 / 路径穿越防护）
+    middleware.cj      内置中间件（access log / recovery / requestID / CORS / bodyLimit）
+    multipart.cj       multipart/form-data 解析
+    cookie.cj          Cookie 解析与 Set-Cookie 序列化
+    chunked.cj         chunked 传输编码
 tachyon_tests/         单元测试
 ```
 
