@@ -1,3 +1,5 @@
+> **已提交上游**：[Cangjie/UsersForum #3577](https://atomgit.com/Cangjie/UsersForum/issues/3577)（2026-11-08）
+
 # [runtime] `SockRecvNonBlockGeneral` 在每次 EAGAIN 上无条件 `sched_yield()`，空转约占 HTTP 服务端 15% CPU
 
 ## 环境

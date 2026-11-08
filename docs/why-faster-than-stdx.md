@@ -413,7 +413,9 @@ do {
 **这也进一步确认：§4.8/§4.9 里的"框架上限"不是 tachyon 的代码问题**，
 而是 runtime 的 I/O 等待路径（无条件 yield + 可失效的自旋判据）。
 
-> 完整的复现材料与修改建议整理成了 issue 草稿：[`upstream-issue-recv-spin.md`](upstream-issue-recv-spin.md)。
+> 已提交上游：**[Cangjie/UsersForum #3577](https://atomgit.com/Cangjie/UsersForum/issues/3577)**
+> —— `[BUG] runtime：SockRecvNonBlockGeneral 在不再自旋时仍执行 sched_yield()，高并发 HTTP 服务端约 17% 的每请求 CPU 空转`
+> （本地草稿：[`upstream-issue-recv-spin.md`](upstream-issue-recv-spin.md)、投稿版 `forum-issue-recv-spin.md`）。
 > runtime 源码：`.scratch/ref/cangjie_runtime`（浅克隆，只读对照，未改动上游）。
 
 ## 5. 这次对比没有证明什么（别过度解读）
