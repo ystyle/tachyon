@@ -67,7 +67,14 @@ public func newDetachedCtx(r: DetachedRequest): RequestCtx {
 public func snapshotResponse(ctx: RequestCtx): DetachedResponse {
     let out = DetachedResponse()
     out.statusCode = ctx.resp.statusCode
-    let n = ctx.resp.header.count()
+    // 特殊头不在普通头表里，先补上（否则测试/适配器读不到 Content-Type）
+    let ht = ctx.resp.header
+    if (ht.contentTypeStr.size > 0) {
+        out.headers.add(("Content-Type", ht.contentTypeStr))
+    } else if (!ht.contentType.isEmpty()) {
+        out.headers.add(("Content-Type", ht.contentType.toStr()))
+    }
+    let n = ht.count()
     var i: Int64 = 0
     while (i < n) {
         out.headers.add((ctx.resp.header.nameAt(i).toStr(), ctx.resp.header.valueAt(i).toStr()))
