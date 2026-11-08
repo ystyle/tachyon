@@ -416,6 +416,10 @@ do {
 > 已提交上游：**[Cangjie/UsersForum #3577](https://atomgit.com/Cangjie/UsersForum/issues/3577)**
 > —— `[BUG] runtime：SockRecvNonBlockGeneral 在不再自旋时仍执行 sched_yield()，高并发 HTTP 服务端约 17% 的每请求 CPU 空转`
 > （本地草稿：[`upstream-issue-recv-spin.md`](upstream-issue-recv-spin.md)、投稿版 `forum-issue-recv-spin.md`）。
+>
+> 附件（采样原始数据 / 火焰图 / 脚本 / 探针）另存公开仓：
+> [github.com/ystyle/cangjie-runtime-issue-3577-repro](https://github.com/ystyle/cangjie-runtime-issue-3577-repro)
+> （AtomGit 镜像同名仓），已在 issue 下留言引用。
 > runtime 源码：`.scratch/ref/cangjie_runtime`（浅克隆，只读对照，未改动上游）。
 
 ## 5. 这次对比没有证明什么（别过度解读）
